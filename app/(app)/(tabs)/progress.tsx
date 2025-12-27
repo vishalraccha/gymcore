@@ -1,10 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  RefreshControl,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../contexts/AuthContext';
 import { Card } from '../../../components/ui/Card';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
-import { TrendingUp, Target, Award, Flame, Zap, Dumbbell, Apple } from 'lucide-react-native';
+import {
+  TrendingUp,
+  Target,
+  Award,
+  Flame,
+  Zap,
+  Dumbbell,
+  Apple,
+} from 'lucide-react-native';
+import SafeAreaWrapper from "@/components/SafeAreaWrapper";
+import { useTheme } from '@/contexts/ThemeContext';
 
 interface UserStats {
   level: number;
@@ -17,8 +35,16 @@ interface UserStats {
   gym_checkins: number;
 }
 
+interface RecentActivity {
+  type: 'workout' | 'meal';
+  name: string;
+  xp: number;
+  date: string;
+}
+
 export default function Progress() {
-  const { user, profile } = useAuth();
+  const { theme } = useTheme();
+  const { user } = useAuth();
   const [userStats, setUserStats] = useState<UserStats>({
     level: 1,
     total_points: 0,
@@ -29,12 +55,16 @@ export default function Progress() {
     total_calories_burned: 0,
     gym_checkins: 0,
   });
-  const [recentActivities, setRecentActivities] = useState<any[]>([]);
+  const [recentActivities, setRecentActivities] = useState<RecentActivity[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const hasLoadedData = useRef(false);
 
-  const calculateXPFromActivity = (workouts: number, meals: number, checkins: number) => {
+  const calculateXPFromActivity = (
+    workouts: number,
+    meals: number,
+    checkins: number
+  ) => {
     const workoutXP = workouts * 50;
     const mealXP = meals * 25;
     const checkinXP = checkins * 30;
@@ -49,7 +79,7 @@ export default function Progress() {
     if (dates.length === 0) return { current: 0, max: 0 };
 
     const sortedDates = dates
-      .map(d => new Date(d).toDateString())
+      .map((d) => new Date(d).toDateString())
       .filter((date, index, self) => self.indexOf(date) === index)
       .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
 
@@ -66,7 +96,9 @@ export default function Progress() {
       for (let i = 0; i < sortedDates.length - 1; i++) {
         const currentDate = new Date(sortedDates[i]);
         const nextDate = new Date(sortedDates[i + 1]);
-        const dayDiff = Math.floor((currentDate.getTime() - nextDate.getTime()) / 86400000);
+        const dayDiff = Math.floor(
+          (currentDate.getTime() - nextDate.getTime()) / 86400000
+        );
 
         if (dayDiff === 1) {
           currentStreak++;
@@ -80,7 +112,9 @@ export default function Progress() {
     for (let i = 0; i < sortedDates.length - 1; i++) {
       const currentDate = new Date(sortedDates[i]);
       const nextDate = new Date(sortedDates[i + 1]);
-      const dayDiff = Math.floor((currentDate.getTime() - nextDate.getTime()) / 86400000);
+      const dayDiff = Math.floor(
+        (currentDate.getTime() - nextDate.getTime()) / 86400000
+      );
 
       if (dayDiff === 1) {
         tempStreak++;
@@ -133,9 +167,9 @@ export default function Progress() {
       const level = calculateLevel(totalXP);
 
       const allActivityDates = [
-        ...workouts.map(w => w.completed_at),
-        ...meals.map(m => m.logged_at),
-        ...checkins.map(c => c.check_in_time),
+        ...workouts.map((w) => w.completed_at),
+        ...meals.map((m) => m.logged_at),
+        ...checkins.map((c) => c.check_in_time),
       ];
 
       const streaks = calculateStreak(allActivityDates);
@@ -201,20 +235,21 @@ export default function Progress() {
         .order('logged_at', { ascending: false })
         .limit(3);
 
-      const activities = [
-        ...(workouts || []).map(w => ({
-          type: 'workout',
-          name: w.workouts?.name || 'Workout',
+      const activities: RecentActivity[] = [
+        ...(workouts || []).map((w: { completed_at: string; calories_burned: number; workouts: { name: string }[] }) => ({
+          type: 'workout' as const,
+          name: w.workouts?.[0]?.name || 'Workout',
           xp: 50,
           date: w.completed_at,
         })),
-        ...(meals || []).map(m => ({
-          type: 'meal',
+        ...(meals || []).map((m) => ({
+          type: 'meal' as const,
           name: m.meal_name,
           xp: 25,
           date: m.logged_at,
         })),
-      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      ]
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
         .slice(0, 5);
 
       setRecentActivities(activities);
@@ -245,9 +280,9 @@ export default function Progress() {
 
       console.log('🔄 Loading progress data...');
       setLoading(true);
-      
+
       await Promise.all([fetchUserStats(), fetchRecentActivities()]);
-      
+
       setLoading(false);
       hasLoadedData.current = true;
       console.log('✅ Progress data loaded');
@@ -260,31 +295,261 @@ export default function Progress() {
     const pointsForCurrentLevel = (userStats.level - 1) * 1000;
     const currentLevelProgress = userStats.total_points - pointsForCurrentLevel;
     const progressPercentage = (currentLevelProgress / 1000) * 100;
-    
+
     return {
       current: Math.max(0, currentLevelProgress),
       total: 1000,
-      percentage: Math.min(Math.max(progressPercentage, 0), 100)
+      percentage: Math.min(Math.max(progressPercentage, 0), 100),
     };
   };
 
   const levelProgress = calculateLevelProgress();
 
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: theme.colors.background,
+    },
+    loadingText: {
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+      marginTop: 12,
+      fontFamily: 'Inter-Regular',
+    },
+    header: {
+      padding: 24,
+      paddingTop: Platform.OS === 'ios' ? 16 : 24,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 4,
+      fontFamily: 'Inter-Bold',
+    },
+    subtitle: {
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+      fontFamily: 'Inter-Regular',
+    },
+    levelCard: {
+      marginHorizontal: 24,
+      marginBottom: 16,
+      padding: 20,
+    },
+    levelHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    levelInfo: {
+      flex: 1,
+    },
+    levelNumber: {
+      fontSize: 24,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 4,
+      fontFamily: 'Inter-Bold',
+    },
+    levelSubtext: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      fontFamily: 'Inter-Regular',
+    },
+    levelIcon: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: theme.colors.primaryLight + '30',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    levelDescription: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      marginTop: 12,
+      fontFamily: 'Inter-Regular',
+    },
+    statsGrid: {
+      flexDirection: 'row',
+      paddingHorizontal: 24,
+      gap: 12,
+      marginBottom: 8,
+    },
+    statCard: {
+      flex: 1,
+      padding: 16,
+      alignItems: 'center',
+    },
+    statNumber: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginTop: 8,
+      marginBottom: 4,
+      fontFamily: 'Inter-Bold',
+    },
+    statLabel: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      fontFamily: 'Inter-Regular',
+    },
+    section: {
+      padding: 24,
+      paddingTop: 16,
+    },
+    sectionTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 16,
+      fontFamily: 'Inter-Bold',
+    },
+    activityGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 12,
+    },
+    activityCard: {
+      width: '48%',
+      padding: 16,
+      alignItems: 'center',
+    },
+    activityNumber: {
+      fontSize: 24,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginTop: 12,
+      marginBottom: 4,
+      fontFamily: 'Inter-Bold',
+    },
+    activityLabel: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      marginBottom: 8,
+      fontFamily: 'Inter-Regular',
+    },
+    activityXP: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.success,
+      fontFamily: 'Inter-SemiBold',
+    },
+    activityItemCard: {
+      padding: 16,
+      marginBottom: 8,
+    },
+    activityItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    activityInfo: {
+      flex: 1,
+    },
+    activityName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 4,
+      fontFamily: 'Inter-SemiBold',
+    },
+    activityDate: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      fontFamily: 'Inter-Regular',
+    },
+    activityXPBadge: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.success,
+      backgroundColor: theme.colors.success + '20',
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 12,
+      fontFamily: 'Inter-SemiBold',
+    },
+    emptyCard: {
+      padding: 40,
+      alignItems: 'center',
+    },
+    emptyText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+      marginTop: 12,
+      marginBottom: 4,
+      fontFamily: 'Inter-SemiBold',
+    },
+    emptySubtext: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      fontFamily: 'Inter-Regular',
+    },
+    guideCard: {
+      padding: 16,
+    },
+    guideItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    guideLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    guideActivity: {
+      fontSize: 14,
+      color: theme.colors.text,
+      fontFamily: 'Inter-Regular',
+    },
+    guideXP: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.success,
+      fontFamily: 'Inter-SemiBold',
+    },
+  });
+
   if (loading && !refreshing) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={styles.loadingText}>Loading progress...</Text>
-      </View>
+      <SafeAreaWrapper>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.loadingText}>Loading progress...</Text>
+        </View>
+      </SafeAreaWrapper>
     );
   }
 
   return (
-    <ScrollView 
+    <SafeAreaWrapper>
+    <ScrollView
       style={styles.container}
       showsVerticalScrollIndicator={false}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        <RefreshControl 
+          refreshing={refreshing} 
+          onRefresh={onRefresh}
+          tintColor={theme.colors.primary}
+          colors={[theme.colors.primary]}
+        />
       }
     >
       {/* Header */}
@@ -303,39 +568,40 @@ export default function Progress() {
             </Text>
           </View>
           <View style={styles.levelIcon}>
-            <Zap size={32} color="#3B82F6" />
+            <Zap size={32} color={theme.colors.primary} />
           </View>
         </View>
-        
-        <ProgressBar 
+
+        <ProgressBar
           label="XP Progress"
           current={levelProgress.current}
           target={levelProgress.total}
           unit="XP"
-          color="#3B82F6"
+          color={theme.colors.primary}
         />
-        
+
         <Text style={styles.levelDescription}>
-          Earn {1000 - levelProgress.current} more XP to reach Level {userStats.level + 1}
+          Earn {1000 - levelProgress.current} more XP to reach Level{' '}
+          {userStats.level + 1}
         </Text>
       </Card>
 
       {/* Stats Grid */}
       <View style={styles.statsGrid}>
         <Card style={styles.statCard}>
-          <Flame size={24} color="#EF4444" />
+          <Flame size={24} color={theme.colors.error} />
           <Text style={styles.statNumber}>{userStats.current_streak}</Text>
           <Text style={styles.statLabel}>Current Streak</Text>
         </Card>
-        
+
         <Card style={styles.statCard}>
-          <Award size={24} color="#F59E0B" />
+          <Award size={24} color={theme.colors.warning} />
           <Text style={styles.statNumber}>{userStats.max_streak}</Text>
           <Text style={styles.statLabel}>Best Streak</Text>
         </Card>
-        
+
         <Card style={styles.statCard}>
-          <Target size={24} color="#10B981" />
+          <Target size={24} color={theme.colors.success} />
           <Text style={styles.statNumber}>{userStats.total_points}</Text>
           <Text style={styles.statLabel}>Total XP</Text>
         </Card>
@@ -346,30 +612,40 @@ export default function Progress() {
         <Text style={styles.sectionTitle}>Activity Stats</Text>
         <View style={styles.activityGrid}>
           <Card style={styles.activityCard}>
-            <Dumbbell size={32} color="#3B82F6" />
-            <Text style={styles.activityNumber}>{userStats.workouts_completed}</Text>
+            <Dumbbell size={32} color={theme.colors.primary} />
+            <Text style={styles.activityNumber}>
+              {userStats.workouts_completed}
+            </Text>
             <Text style={styles.activityLabel}>Workouts</Text>
-            <Text style={styles.activityXP}>+{userStats.workouts_completed * 50} XP</Text>
+            <Text style={styles.activityXP}>
+              +{userStats.workouts_completed * 50} XP
+            </Text>
           </Card>
 
           <Card style={styles.activityCard}>
-            <Apple size={32} color="#10B981" />
+            <Apple size={32} color={theme.colors.success} />
             <Text style={styles.activityNumber}>{userStats.meals_logged}</Text>
             <Text style={styles.activityLabel}>Meals Logged</Text>
-            <Text style={styles.activityXP}>+{userStats.meals_logged * 25} XP</Text>
+            <Text style={styles.activityXP}>
+              +{userStats.meals_logged * 25} XP
+            </Text>
           </Card>
 
           <Card style={styles.activityCard}>
-            <Flame size={32} color="#EF4444" />
-            <Text style={styles.activityNumber}>{userStats.total_calories_burned}</Text>
+            <Flame size={32} color={theme.colors.error} />
+            <Text style={styles.activityNumber}>
+              {userStats.total_calories_burned}
+            </Text>
             <Text style={styles.activityLabel}>Calories Burned</Text>
           </Card>
 
           <Card style={styles.activityCard}>
-            <TrendingUp size={32} color="#8B5CF6" />
+            <TrendingUp size={32} color={theme.colors.accent} />
             <Text style={styles.activityNumber}>{userStats.gym_checkins}</Text>
             <Text style={styles.activityLabel}>Gym Check-ins</Text>
-            <Text style={styles.activityXP}>+{userStats.gym_checkins * 30} XP</Text>
+            <Text style={styles.activityXP}>
+              +{userStats.gym_checkins * 30} XP
+            </Text>
           </Card>
         </View>
       </View>
@@ -396,9 +672,11 @@ export default function Progress() {
           ))
         ) : (
           <Card style={styles.emptyCard}>
-            <TrendingUp size={48} color="#9CA3AF" />
+            <TrendingUp size={48} color={theme.colors.textSecondary} />
             <Text style={styles.emptyText}>No recent activities</Text>
-            <Text style={styles.emptySubtext}>Start working out to earn XP</Text>
+            <Text style={styles.emptySubtext}>
+              Start working out to earn XP
+            </Text>
           </Card>
         )}
       </View>
@@ -409,28 +687,28 @@ export default function Progress() {
         <Card style={styles.guideCard}>
           <View style={styles.guideItem}>
             <View style={styles.guideLeft}>
-              <Dumbbell size={20} color="#3B82F6" />
+              <Dumbbell size={20} color={theme.colors.primary} />
               <Text style={styles.guideActivity}>Complete a workout</Text>
             </View>
             <Text style={styles.guideXP}>+50 XP</Text>
           </View>
           <View style={styles.guideItem}>
             <View style={styles.guideLeft}>
-              <Apple size={20} color="#10B981" />
+              <Apple size={20} color={theme.colors.success} />
               <Text style={styles.guideActivity}>Log a meal</Text>
             </View>
             <Text style={styles.guideXP}>+25 XP</Text>
           </View>
           <View style={styles.guideItem}>
             <View style={styles.guideLeft}>
-              <TrendingUp size={20} color="#8B5CF6" />
+              <TrendingUp size={20} color={theme.colors.accent} />
               <Text style={styles.guideActivity}>Check in to gym</Text>
             </View>
             <Text style={styles.guideXP}>+30 XP</Text>
           </View>
           <View style={styles.guideItem}>
             <View style={styles.guideLeft}>
-              <Flame size={20} color="#EF4444" />
+              <Flame size={20} color={theme.colors.error} />
               <Text style={styles.guideActivity}>Maintain daily streak</Text>
             </View>
             <Text style={styles.guideXP}>Bonus</Text>
@@ -438,227 +716,6 @@ export default function Progress() {
         </Card>
       </View>
     </ScrollView>
+    </SafeAreaWrapper>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#6B7280',
-    marginTop: 12,
-    fontFamily: 'Inter-Regular',
-  },
-  header: {
-    padding: 24,
-    paddingTop: 60,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 4,
-    fontFamily: 'Inter-Bold',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#6B7280',
-    fontFamily: 'Inter-Regular',
-  },
-  levelCard: {
-    marginHorizontal: 24,
-    marginBottom: 16,
-    padding: 20,
-  },
-  levelHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  levelInfo: {
-    flex: 1,
-  },
-  levelNumber: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 4,
-    fontFamily: 'Inter-Bold',
-  },
-  levelSubtext: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontFamily: 'Inter-Regular',
-  },
-  levelIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#EFF6FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  levelDescription: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginTop: 12,
-    fontFamily: 'Inter-Regular',
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    paddingHorizontal: 24,
-    gap: 12,
-    marginBottom: 8,
-  },
-  statCard: {
-    flex: 1,
-    padding: 16,
-    alignItems: 'center',
-  },
-  statNumber: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-    marginTop: 8,
-    marginBottom: 4,
-    fontFamily: 'Inter-Bold',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
-    fontFamily: 'Inter-Regular',
-  },
-  section: {
-    padding: 24,
-    paddingTop: 16,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 16,
-    fontFamily: 'Inter-Bold',
-  },
-  activityGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  activityCard: {
-    width: '48%',
-    padding: 16,
-    alignItems: 'center',
-  },
-  activityNumber: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#111827',
-    marginTop: 12,
-    marginBottom: 4,
-    fontFamily: 'Inter-Bold',
-  },
-  activityLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginBottom: 8,
-    fontFamily: 'Inter-Regular',
-  },
-  activityXP: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#10B981',
-    fontFamily: 'Inter-SemiBold',
-  },
-  activityItemCard: {
-    padding: 16,
-    marginBottom: 8,
-  },
-  activityItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  activityInfo: {
-    flex: 1,
-  },
-  activityName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 4,
-    fontFamily: 'Inter-SemiBold',
-  },
-  activityDate: {
-    fontSize: 12,
-    color: '#6B7280',
-    fontFamily: 'Inter-Regular',
-  },
-  activityXPBadge: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#10B981',
-    backgroundColor: '#ECFDF5',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    fontFamily: 'Inter-SemiBold',
-  },
-  emptyCard: {
-    padding: 40,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#6B7280',
-    marginTop: 12,
-    marginBottom: 4,
-    fontFamily: 'Inter-SemiBold',
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    fontFamily: 'Inter-Regular',
-  },
-  guideCard: {
-    padding: 16,
-  },
-  guideItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  guideLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  guideActivity: {
-    fontSize: 14,
-    color: '#111827',
-    fontFamily: 'Inter-Regular',
-  },
-  guideXP: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#10B981',
-    fontFamily: 'Inter-SemiBold',
-  },
-});

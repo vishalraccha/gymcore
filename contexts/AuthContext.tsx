@@ -29,13 +29,13 @@ interface AuthContextType {
   profile: Profile | null;
   gym: Gym | null;
   isLoading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: any }>;
+  signIn: (email: string, password: string, role?: string) => Promise<{ error: Error | null }>;  // Add role parameter
   signUp: (
     email: string,
     password: string,
     fullName: string,
     role: string
-  ) => Promise<{ error: any }>;
+  ) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   refreshGym: () => Promise<void>;
@@ -89,8 +89,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(data as Profile);
 
         // if profile has gym_id fetch gym
-        if ((data as any)?.gym_id) {
-          await fetchGym((data as any).gym_id);
+        if ((data as Profile)?.gym_id) {
+          await fetchGym((data as Profile).gym_id);
         } else {
           setGym(null);
         }
@@ -136,8 +136,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty array - only runs once
+  // Remove the eslint-disable comment to enforce the rule
+    }, []); // Empty array - only runs once
 
   // auth listener - RUNS ONLY ONCE ON MOUNT
   useEffect(() => {
@@ -157,29 +157,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       try {
         listener.subscription.unsubscribe();
-      } catch (e) {}
+      } catch (e) {console.log(e);
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty array - only runs once
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error };
-  };
+// const signIn = async (email: string, password: string, role?: string) => {
+const signIn = async (email: string, password: string) => {
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  return { error };
+};
 
-  const signUp = async (
-    email: string,
-    password: string,
-    fullName: string,
-    role: string
-  ) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName, role } },
-    });
-    return { error };
-  };
+ const signUp = async (
+  email: string,
+  password: string,
+  fullName: string,
+  role: string
+) => {
+  if (!email || !password) {
+    return { error: new Error("Email and password required") };
+  }
+
+  if (password.length < 6) {
+    return { error: new Error("Password must be at least 6 characters") };
+  }
+
+  const { error } = await supabase.auth.signUp({
+    email: email.trim(),
+    password,
+    options: {
+      data: {
+        full_name: fullName?.trim() || null,
+        role: role?.trim().toLowerCase() || "user",
+      },
+    },
+  });
+
+  return { error };
+};
+
 
   const signOut = async () => {
     try {

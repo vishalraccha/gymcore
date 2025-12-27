@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert, RefreshControl, ActivityIndicator, Platform } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
 import { Workout } from '@/types/database';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import SafeAreaWrapper from '@/components/SafeAreaWrapper';
 import { Plus, Clock, Flame, CreditCard as Edit, Trash2, X } from 'lucide-react-native';
-import { Platform } from "react-native";
 
 
 export default function WorkoutsManagementScreen() {
+  const { theme } = useTheme();
   const { profile, user } = useAuth();
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [showAddWorkout, setShowAddWorkout] = useState(false);
@@ -122,9 +124,10 @@ export default function WorkoutsManagementScreen() {
       resetForm();
       await fetchWorkouts();
       Alert.alert('Success', `Workout ${editingWorkout ? 'updated' : 'added'} successfully!`);
-    } catch (error: any) {
+    } catch (error) {
       console.error('❌ Error saving workout:', error);
-      Alert.alert('Error', error.message || 'Failed to save workout');
+      const message = error instanceof Error ? error.message : 'Failed to save workout';
+      Alert.alert('Error', message);
     } finally {
       setIsSaving(false);
     }
@@ -161,7 +164,7 @@ export default function WorkoutsManagementScreen() {
   try {
     console.log("🗑️ Deleting workout:", workoutId);
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("workouts")
       .delete()
       .eq("id", workoutId)
@@ -227,21 +230,254 @@ export default function WorkoutsManagementScreen() {
     return days[dayNumber] || 'Any Day';
   };
 
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: theme.colors.background,
+    },
+    loadingText: {
+      marginTop: 12,
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+    },
+    header: {
+      padding: 24,
+      paddingTop: Platform.OS === 'ios' ? 16 : 24,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    subtitle: {
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+    },
+    workoutCard: {
+      marginHorizontal: 24,
+      marginBottom: 12,
+      padding: 16,
+    },
+    workoutHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+    },
+    workoutInfo: {
+      flex: 1,
+      paddingRight: 12,
+    },
+    workoutName: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+      marginBottom: 4,
+    },
+    workoutDescription: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginBottom: 8,
+      lineHeight: 20,
+    },
+    workoutMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+      marginBottom: 8,
+    },
+    metaItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    metaText: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+    },
+    dayText: {
+      fontSize: 12,
+      color: theme.colors.primary,
+      fontWeight: '600',
+    },
+    categoryBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    categoryText: {
+      fontSize: 12,
+      color: theme.colors.success,
+      fontWeight: '600',
+      backgroundColor: theme.colors.success + '30',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 6,
+    },
+    difficultyText: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      textTransform: 'capitalize',
+    },
+    workoutActions: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    actionButton: {
+      padding: 8,
+      borderRadius: 8,
+      backgroundColor: theme.colors.border + '40',
+    },
+    noWorkoutsCard: {
+      marginHorizontal: 24,
+      alignItems: 'center',
+      paddingVertical: 48,
+    },
+    noWorkoutsText: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 8,
+    },
+    noWorkoutsSubtext: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      marginBottom: 24,
+    },
+    createButton: {
+      minWidth: 200,
+    },
+    fab: {
+      position: 'absolute',
+      bottom: (Platform.OS === 'ios' ? 0 : 0) + 24 + 57,
+      right: 24,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: theme.colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: theme.colors.primary,
+      shadowOffset: {
+        width: 0,
+        height: 2,
+      },
+      shadowOpacity: 0.25,
+      shadowRadius: 3.84,
+      elevation: 5,
+    },
+    modalContainer: {
+      flex: 1,
+      backgroundColor: theme.colors.card,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 24,
+      paddingTop: Platform.OS === 'ios' ? 16 : 24,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    modalContent: {
+      flex: 1,
+      padding: 24,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 16,
+      marginBottom: 16,
+      backgroundColor: theme.colors.background,
+      color: theme.colors.text,
+    },
+    textArea: {
+      minHeight: 80,
+      textAlignVertical: 'top',
+    },
+    inputRow: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    inputHalf: {
+      flex: 1,
+    },
+    inputLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 8,
+    },
+    difficultySelector: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 24,
+    },
+    difficultyButton: {
+      flex: 1,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.card,
+      alignItems: 'center',
+    },
+    difficultyButtonActive: {
+      backgroundColor: theme.colors.primary,
+      borderColor: theme.colors.primary,
+    },
+    difficultyButtonText: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      fontWeight: '500',
+    },
+    difficultyButtonTextActive: {
+      color: theme.colors.card,
+    },
+    addButton: {
+      marginTop: 16,
+      marginBottom: 40,
+    },
+  });
+
   if (isLoading && !refreshing) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={styles.loadingText}>Loading workouts...</Text>
-      </View>
+      <SafeAreaWrapper>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.loadingText}>Loading workouts...</Text>
+        </View>
+      </SafeAreaWrapper>
     );
   }
 
   return (
+    <SafeAreaWrapper>
     <View style={styles.container}>
       <ScrollView 
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            tintColor={theme.colors.primary}
+            colors={[theme.colors.primary]}
+          />
         }
       >
         <View style={styles.header}>
@@ -264,11 +500,11 @@ export default function WorkoutsManagementScreen() {
                 )}
                 <View style={styles.workoutMeta}>
                   <View style={styles.metaItem}>
-                    <Clock size={16} color="#6B7280" />
+                    <Clock size={16} color={theme.colors.textSecondary} />
                     <Text style={styles.metaText}>{workout.duration_minutes} min</Text>
                   </View>
                   <View style={styles.metaItem}>
-                    <Flame size={16} color="#6B7280" />
+                    <Flame size={16} color={theme.colors.textSecondary} />
                     <Text style={styles.metaText}>
                       {workout.calories_per_minute || 5} cal/min
                     </Text>
@@ -285,13 +521,13 @@ export default function WorkoutsManagementScreen() {
                   onPress={() => editWorkout(workout)}
                   style={styles.actionButton}
                 >
-                  <Edit size={20} color="#3B82F6" />
+                  <Edit size={20} color={theme.colors.primary} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => deleteWorkout(workout.id)}
                   style={styles.actionButton}
                 >
-                  <Trash2 size={20} color="#EF4444" />
+                  <Trash2 size={20} color={theme.colors.error} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -319,7 +555,7 @@ export default function WorkoutsManagementScreen() {
           style={styles.fab}
           onPress={() => setShowAddWorkout(true)}
         >
-          <Plus size={24} color="#ffffff" />
+          <Plus size={24} color={theme.colors.card} />
         </TouchableOpacity>
       )}
 
@@ -336,7 +572,7 @@ export default function WorkoutsManagementScreen() {
               {editingWorkout ? 'Edit Workout' : 'Add New Workout'}
             </Text>
             <TouchableOpacity onPress={resetForm}>
-              <X size={24} color="#6B7280" />
+              <X size={24} color={theme.colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -348,7 +584,7 @@ export default function WorkoutsManagementScreen() {
             <TextInput
               style={styles.input}
               placeholder="Workout Name *"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.colors.textSecondary}
               value={newWorkout.name}
               onChangeText={(text) => setNewWorkout({ ...newWorkout, name: text })}
             />
@@ -356,7 +592,7 @@ export default function WorkoutsManagementScreen() {
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="Description"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.colors.textSecondary}
               value={newWorkout.description}
               onChangeText={(text) => setNewWorkout({ ...newWorkout, description: text })}
               multiline
@@ -367,7 +603,7 @@ export default function WorkoutsManagementScreen() {
             <TextInput
               style={styles.input}
               placeholder="Category (e.g., Cardio, Strength) *"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.colors.textSecondary}
               value={newWorkout.category}
               onChangeText={(text) => setNewWorkout({ ...newWorkout, category: text })}
             />
@@ -377,7 +613,7 @@ export default function WorkoutsManagementScreen() {
                 <TextInput
                   style={styles.input}
                   placeholder="Duration (min) *"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={theme.colors.textSecondary}
                   value={newWorkout.duration_minutes}
                   onChangeText={(text) => setNewWorkout({ ...newWorkout, duration_minutes: text })}
                   keyboardType="numeric"
@@ -387,7 +623,7 @@ export default function WorkoutsManagementScreen() {
                 <TextInput
                   style={styles.input}
                   placeholder="Calories/min"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={theme.colors.textSecondary}
                   value={newWorkout.calories_per_minute}
                   onChangeText={(text) => setNewWorkout({ ...newWorkout, calories_per_minute: text })}
                   keyboardType="numeric"
@@ -404,7 +640,7 @@ export default function WorkoutsManagementScreen() {
                     styles.difficultyButton,
                     newWorkout.difficulty === level && styles.difficultyButtonActive,
                   ]}
-                  onPress={() => setNewWorkout({ ...newWorkout, difficulty: level as any })}
+                  onPress={() => setNewWorkout({ ...newWorkout, difficulty: level as 'beginner' | 'intermediate' | 'advanced' })}
                 >
                   <Text
                     style={[
@@ -421,7 +657,7 @@ export default function WorkoutsManagementScreen() {
             <TextInput
               style={styles.input}
               placeholder="Day of Week (0=Sunday, 6=Saturday, leave empty for any day)"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.colors.textSecondary}
               value={newWorkout.day_of_week}
               onChangeText={(text) => setNewWorkout({ ...newWorkout, day_of_week: text })}
               keyboardType="numeric"
@@ -430,7 +666,7 @@ export default function WorkoutsManagementScreen() {
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="Instructions (one per line)"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.colors.textSecondary}
               value={newWorkout.instructions}
               onChangeText={(text) => setNewWorkout({ ...newWorkout, instructions: text })}
               multiline
@@ -448,230 +684,6 @@ export default function WorkoutsManagementScreen() {
         </View>
       </Modal>
     </View>
+    </SafeAreaWrapper>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#6B7280',
-  },
-  header: {
-    padding: 24,
-    paddingTop: 60,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#111827',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#6B7280',
-    marginTop: 4,
-  },
-  workoutCard: {
-    marginHorizontal: 24,
-    marginBottom: 12,
-    padding: 16,
-  },
-  workoutHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  workoutInfo: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  workoutName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  workoutDescription: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 8,
-    lineHeight: 20,
-  },
-  workoutMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    marginBottom: 8,
-  },
-  metaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  metaText: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  dayText: {
-    fontSize: 12,
-    color: '#3B82F6',
-    fontWeight: '600',
-  },
-  categoryBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  categoryText: {
-    fontSize: 12,
-    color: '#059669',
-    fontWeight: '600',
-    backgroundColor: '#D1FAE5',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  difficultyText: {
-    fontSize: 12,
-    color: '#6B7280',
-    textTransform: 'capitalize',
-  },
-  workoutActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  actionButton: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: '#F3F4F6',
-  },
-  noWorkoutsCard: {
-    marginHorizontal: 24,
-    alignItems: 'center',
-    paddingVertical: 48,
-  },
-  noWorkoutsText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  noWorkoutsSubtext: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  createButton: {
-    minWidth: 200,
-  },
-  fab: {
-    position: 'absolute',
-    bottom: 24,
-    right: 24,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#3B82F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 24,
-    paddingTop: 60,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#111827',
-  },
-  modalContent: {
-    flex: 1,
-    padding: 24,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    marginBottom: 16,
-    backgroundColor: '#ffffff',
-    color: '#111827',
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  inputRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  inputHalf: {
-    flex: 1,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  difficultySelector: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 24,
-  },
-  difficultyButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-  },
-  difficultyButtonActive: {
-    backgroundColor: '#3B82F6',
-    borderColor: '#3B82F6',
-  },
-  difficultyButtonText: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  difficultyButtonTextActive: {
-    color: '#ffffff',
-  },
-  addButton: {
-    marginTop: 16,
-    marginBottom: 40,
-  },
-});

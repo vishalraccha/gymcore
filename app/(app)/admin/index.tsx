@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Platform } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { Card } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
+import { useTheme } from '@/contexts/ThemeContext';
+import SafeAreaWrapper from '@/components/SafeAreaWrapper';
 import {
   Users,
   UserPlus,
@@ -32,6 +34,7 @@ interface Stats {
 }
 
 export default function AdminDashboardScreen() {
+  const { theme } = useTheme();
   const { profile, gym } = useAuth();
   const [stats, setStats] = useState<Stats>({
     totalMembers: 0,
@@ -180,7 +183,7 @@ export default function AdminDashboardScreen() {
           {
             title: 'Gym Profile',
             subtitle: 'Manage your gym information',
-            icon: <Building2 size={22} color="#8B5CF6" />,
+            icon: <Building2 size={22} color={theme.colors.accent} />,
             onPress: () => router.push('/(app)/admin/gym-profile'),
           },
         ]
@@ -188,50 +191,174 @@ export default function AdminDashboardScreen() {
     {
       title: 'Members',
       subtitle: 'View & manage gym members',
-      icon: <Users size={22} color="#3B82F6" />,
+      icon: <Users size={22} color={theme.colors.primary} />,
       onPress: () => router.push('/(app)/admin/members'),
     },
     {
       title: 'Workouts',
       subtitle: 'Create and manage workouts',
-      icon: <Dumbbell size={22} color="#10B981" />,
+      icon: <Dumbbell size={22} color={theme.colors.success} />,
       onPress: () => router.push('/(app)/admin/workouts'),
     },
     {
       title: 'Subscriptions',
       subtitle: 'Manage subscription plans',
-      icon: <CreditCard size={22} color="#F59E0B" />,
+      icon: <CreditCard size={22} color={theme.colors.warning} />,
       onPress: () => router.push('/(app)/admin/subscriptions'),
     },
     {
       title: 'Analytics',
       subtitle: 'View performance insights',
-      icon: <TrendingUp size={22} color="#8B5CF6" />,
+      icon: <TrendingUp size={22} color={theme.colors.accent} />,
       onPress: () => router.push('/(app)/admin/analytics'),
     },
   ];
 
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: theme.colors.background,
+    },
+    loadingText: {
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+      marginTop: 12,
+    },
+    header: {
+      paddingHorizontal: 24,
+      paddingTop: Platform.OS === 'ios' ? 16 : 24,
+      paddingBottom: 20,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 8,
+    },
+    headerTextContainer: {
+      flex: 1,
+    },
+    headerTitle: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    headerLocation: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+    headerSubtitle: {
+      marginTop: 6,
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+    },
+    section: {
+      marginBottom: 8,
+    },
+    sectionTitle: {
+      paddingHorizontal: 24,
+      fontSize: 20,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 12,
+    },
+    statGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      paddingHorizontal: 12,
+      justifyContent: 'space-between',
+    },
+    resourcesRow: {
+      flexDirection: 'row',
+      paddingHorizontal: 24,
+      gap: 12,
+    },
+    resourceCard: {
+      flex: 1,
+      alignItems: 'center',
+      padding: 20,
+    },
+    resourceValue: {
+      fontSize: 32,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginTop: 12,
+      marginBottom: 4,
+    },
+    resourceLabel: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+    },
+    menuCard: {
+      marginHorizontal: 24,
+      marginBottom: 12,
+      paddingVertical: 4,
+    },
+    menuRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    menuIcon: {
+      width: 50,
+      height: 50,
+      borderRadius: 12,
+      backgroundColor: theme.colors.border + '40',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 16,
+    },
+    menuText: {
+      flex: 1,
+    },
+    menuTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    menuSubtitle: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+  });
+
   if (isLoading && !refreshing) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={styles.loadingText}>Loading dashboard...</Text>
-      </View>
+      <SafeAreaWrapper>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.loadingText}>Loading dashboard...</Text>
+        </View>
+      </SafeAreaWrapper>
     );
   }
 
   return (
+    <SafeAreaWrapper>
     <ScrollView 
       style={styles.container} 
       showsVerticalScrollIndicator={false}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        <RefreshControl 
+          refreshing={refreshing} 
+          onRefresh={onRefresh}
+          tintColor={theme.colors.primary}
+          colors={[theme.colors.primary]}
+        />
       }
     >
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerRow}>
-          <Building2 size={32} color="#3B82F6" />
+          <Building2 size={32} color={theme.colors.primary} />
           <View style={styles.headerTextContainer}>
             <Text style={styles.headerTitle}>{gym?.name || 'Admin Dashboard'}</Text>
             {gym?.location && (
@@ -253,26 +380,26 @@ export default function AdminDashboardScreen() {
           <StatCard
             title="Total Members"
             value={String(stats.totalMembers)}
-            color="#3B82F6"
-            icon={<Users size={22} color="#3B82F6" />}
+            color={theme.colors.primary}
+            icon={<Users size={22} color={theme.colors.primary} />}
           />
           <StatCard
             title="Active Members"
             value={String(stats.activeMembers)}
-            color="#10B981"
-            icon={<UserPlus size={22} color="#10B981" />}
+            color={theme.colors.success}
+            icon={<UserPlus size={22} color={theme.colors.success} />}
           />
           <StatCard
             title="Expired"
             value={String(stats.expiredMembers)}
-            color="#EF4444"
-            icon={<Users size={22} color="#EF4444" />}
+            color={theme.colors.error}
+            icon={<Users size={22} color={theme.colors.error} />}
           />
           <StatCard
             title="Check-ins"
             value={String(stats.totalCheckIns)}
-            color="#06B6D4"
-            icon={<Calendar size={22} color="#06B6D4" />}
+            color={theme.colors.accent}
+            icon={<Calendar size={22} color={theme.colors.accent} />}
           />
         </View>
       </View>
@@ -284,26 +411,26 @@ export default function AdminDashboardScreen() {
           <StatCard
             title="Total Sessions"
             value={String(stats.totalWorkoutLogs)}
-            color="#06B6D4"
-            icon={<Activity size={22} color="#06B6D4" />}
+            color={theme.colors.accent}
+            icon={<Activity size={22} color={theme.colors.accent} />}
           />
           <StatCard
             title="Calories Burned"
             value={`${Math.round(stats.totalCaloriesBurned / 1000)}k`}
-            color="#EF4444"
-            icon={<Flame size={22} color="#EF4444" />}
+            color={theme.colors.error}
+            icon={<Flame size={22} color={theme.colors.error} />}
           />
           <StatCard
             title="Hours Exercised"
             value={`${Math.round(stats.totalMinutesExercised / 60)}h`}
-            color="#10B981"
-            icon={<Clock size={22} color="#10B981" />}
+            color={theme.colors.success}
+            icon={<Clock size={22} color={theme.colors.success} />}
           />
           <StatCard
             title="Avg Workouts"
             value={String(stats.avgWorkoutsPerMember)}
-            color="#F59E0B"
-            icon={<TrendingUp size={22} color="#F59E0B" />}
+            color={theme.colors.warning}
+            icon={<TrendingUp size={22} color={theme.colors.warning} />}
           />
         </View>
       </View>
@@ -313,12 +440,12 @@ export default function AdminDashboardScreen() {
         <Text style={styles.sectionTitle}>Resources</Text>
         <View style={styles.resourcesRow}>
           <Card style={styles.resourceCard}>
-            <Dumbbell size={32} color="#8B5CF6" />
+            <Dumbbell size={32} color={theme.colors.accent} />
             <Text style={styles.resourceValue}>{stats.totalWorkouts}</Text>
             <Text style={styles.resourceLabel}>Workout Plans</Text>
           </Card>
           <Card style={styles.resourceCard}>
-            <CreditCard size={32} color="#F59E0B" />
+            <CreditCard size={32} color={theme.colors.warning} />
             <Text style={styles.resourceValue}>{stats.totalSubscriptions}</Text>
             <Text style={styles.resourceLabel}>Subscription Plans</Text>
           </Card>
@@ -343,131 +470,6 @@ export default function AdminDashboardScreen() {
         ))}
       </View>
     </ScrollView>
+    </SafeAreaWrapper>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#6B7280',
-    marginTop: 12,
-  },
-
-  /* Header */
-  header: {
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 20,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
-  },
-  headerTextContainer: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  headerLocation: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  headerSubtitle: {
-    marginTop: 6,
-    fontSize: 16,
-    color: '#6B7280',
-  },
-
-  /* Sections */
-  section: {
-    marginBottom: 8,
-  },
-  sectionTitle: {
-    paddingHorizontal: 24,
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 12,
-  },
-
-  /* Stats Grid */
-  statGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 12,
-    justifyContent: 'space-between',
-  },
-
-  /* Resources */
-  resourcesRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 24,
-    gap: 12,
-  },
-  resourceCard: {
-    flex: 1,
-    alignItems: 'center',
-    padding: 20,
-  },
-  resourceValue: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#111827',
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  resourceLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-
-  /* Menu Cards */
-  menuCard: {
-    marginHorizontal: 24,
-    marginBottom: 12,
-    paddingVertical: 4,
-  },
-  menuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  menuIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 12,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  menuText: {
-    flex: 1,
-  },
-  menuTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  menuSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-});

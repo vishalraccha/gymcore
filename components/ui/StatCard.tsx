@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { useTheme } from '@/contexts/ThemeContext';
 
 interface StatCardProps {
   title: string;
@@ -9,21 +10,31 @@ interface StatCardProps {
   color?: string;
 }
 
-export function StatCard({ title, value, unit, icon, color = '#3B82F6' }: StatCardProps) {
+export function StatCard({ title, value, unit, icon, color }: StatCardProps) {
+  const { theme } = useTheme();
+  const borderColor = color || theme.colors.primary;
+  
   // Ensure all values are properly converted to strings
   const safeValue = value !== null && value !== undefined ? String(value) : '0';
   const safeUnit = unit && typeof unit === 'string' && unit.trim() ? unit.trim() : '';
   const safeTitle = title || 'Stat';
 
   return (
-    <View style={[styles.card, { borderLeftColor: color }]}>
+    <View style={[
+      styles.card,
+      {
+        backgroundColor: theme.colors.card,
+        borderLeftColor: borderColor,
+        shadowColor: theme.colors.text,
+      }
+    ]}>
       <View style={styles.header}>
         {icon && <View style={styles.icon}>{icon}</View>}
-        <Text style={styles.title}>{safeTitle}</Text>
+        <Text style={[styles.title, { color: theme.colors.textSecondary }]}>{safeTitle}</Text>
       </View>
       <View style={styles.valueContainer}>
-        <Text style={styles.value}>{safeValue}</Text>
-        {safeUnit && <Text style={styles.unit}>{safeUnit}</Text>}
+        <Text style={[styles.value, { color: theme.colors.text }]}>{safeValue}</Text>
+        {safeUnit && <Text style={[styles.unit, { color: theme.colors.textSecondary }]}>{safeUnit}</Text>}
       </View>
     </View>
   );
@@ -31,12 +42,10 @@ export function StatCard({ title, value, unit, icon, color = '#3B82F6' }: StatCa
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 16,
     margin: 4,
     borderLeftWidth: 4,
-    shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 2,
@@ -58,7 +67,6 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 14,
-    color: '#6B7280',
     fontWeight: '500',
     flex: 1,
     fontFamily: 'Inter-Regular',
@@ -70,12 +78,10 @@ const styles = StyleSheet.create({
   value: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#1F2937',
     fontFamily: 'Inter-Bold',
   },
   unit: {
     fontSize: 14,
-    color: '#6B7280',
     marginLeft: 4,
     fontFamily: 'Inter-Regular',
   },

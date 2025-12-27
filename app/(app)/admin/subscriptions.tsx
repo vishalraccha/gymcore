@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { 
   View, Text, StyleSheet, ScrollView, TouchableOpacity, 
-  TextInput, Modal, Alert, RefreshControl, ActivityIndicator 
+  TextInput, Modal, Alert, RefreshControl, ActivityIndicator, Platform
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import SafeAreaWrapper from '@/components/SafeAreaWrapper';
 import { 
   Plus, Edit, Trash2, X, CreditCard, DollarSign, Calendar, Users 
 } from 'lucide-react-native';
@@ -29,6 +31,7 @@ interface Subscription {
 }
 
 export default function SubscriptionsScreen() {
+  const { theme } = useTheme();
   const { profile, gym } = useAuth();
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [showAddSubscription, setShowAddSubscription] = useState(false);
@@ -91,7 +94,7 @@ export default function SubscriptionsScreen() {
       );
 
       setSubscriptions(subscriptionsWithCounts);
-    } catch (error: any) {
+    } catch (error: Error | unknown) {
       console.error('Error fetching subscriptions:', error);
       Alert.alert('Error', 'Failed to fetch subscriptions');
     } finally {
@@ -168,9 +171,9 @@ export default function SubscriptionsScreen() {
 
       resetForm();
       await fetchSubscriptions();
-    } catch (error: any) {
+    } catch (error: Error | unknown) {
       console.error('Error saving subscription:', error);
-      Alert.alert('Error', error.message || 'Failed to save subscription plan');
+      Alert.alert('Error', error instanceof Error ? error.message : 'Failed to save subscription plan');
     } finally {
       setIsSaving(false);
     }
@@ -205,7 +208,7 @@ export default function SubscriptionsScreen() {
 
               await fetchSubscriptions();
               Alert.alert('Success', 'Subscription plan deleted successfully');
-            } catch (error: any) {
+            } catch (error: Error | unknown) {
               console.error('Error deleting subscription:', error);
               Alert.alert('Error', 'Failed to delete subscription plan');
             }
@@ -239,21 +242,239 @@ export default function SubscriptionsScreen() {
     setShowAddSubscription(false);
   };
 
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: theme.colors.background,
+    },
+    loadingText: {
+      marginTop: 12,
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+    },
+    header: {
+      padding: 24,
+      paddingTop: Platform.OS === 'ios' ? 16 : 24,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    subtitle: {
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+    },
+    subscriptionCard: {
+      marginHorizontal: 24,
+      marginBottom: 16,
+      padding: 20,
+    },
+    subscriptionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+    },
+    subscriptionInfo: {
+      flex: 1,
+    },
+    subscriptionName: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+      marginBottom: 8,
+    },
+    priceRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginBottom: 8,
+    },
+    subscriptionPrice: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: theme.colors.success,
+    },
+    subscriptionDuration: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+    },
+    metaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginBottom: 4,
+    },
+    metaText: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+    },
+    subscriptionActions: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    actionButton: {
+      padding: 8,
+      borderRadius: 8,
+      backgroundColor: theme.colors.border + '40',
+    },
+    noSubscriptionsCard: {
+      marginHorizontal: 24,
+      alignItems: 'center',
+      paddingVertical: 48,
+    },
+    noSubscriptionsText: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 8,
+    },
+    noSubscriptionsSubtext: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      marginBottom: 24,
+    },
+    createButton: {
+      minWidth: 200,
+    },
+    fab: {
+      position: 'absolute',
+      bottom: (Platform.OS === 'ios' ? 0 : 0) + 24 + 57,
+      right: 24,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: theme.colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: theme.colors.primary,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 8,
+    },
+    modalContainer: {
+      flex: 1,
+      backgroundColor: theme.colors.card,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 24,
+      paddingTop: Platform.OS === 'ios' ? 16 : 24,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    modalContent: {
+      flex: 1,
+      padding: 24,
+    },
+    inputLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 8,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 16,
+      marginBottom: 20,
+      backgroundColor: theme.colors.background,
+      color: theme.colors.text,
+    },
+    textArea: {
+      minHeight: 100,
+      textAlignVertical: 'top',
+    },
+    textAreaLarge: {
+      minHeight: 120,
+      textAlignVertical: 'top',
+    },
+    inputRow: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    inputHalf: {
+      flex: 1,
+    },
+    helperText: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      marginBottom: 20,
+      lineHeight: 18,
+    },
+    addButton: {
+      marginTop: 8,
+      marginBottom: 40,
+    },
+    description: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      lineHeight: 20,
+      marginBottom: 12,
+    },
+    features: {
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+    featuresTitle: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 8,
+    },
+    featureItem: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginBottom: 6,
+      lineHeight: 20,
+    },
+    createFirstButton: {
+      minWidth: 200,
+    },
+  });
+
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={styles.loadingText}>Loading subscription plans...</Text>
-      </View>
+      <SafeAreaWrapper>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.loadingText}>Loading subscription plans...</Text>
+        </View>
+      </SafeAreaWrapper>
     );
   }
 
   return (
+    <SafeAreaWrapper>
     <View style={styles.container}>
       <ScrollView 
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            tintColor={theme.colors.primary}
+            colors={[theme.colors.primary]}
+          />
         }
       >
         <View style={styles.header}>
@@ -270,7 +491,7 @@ export default function SubscriptionsScreen() {
               <View style={styles.subscriptionInfo}>
                 <Text style={styles.subscriptionName}>{subscription.name}</Text>
                 <View style={styles.priceRow}>
-                  <DollarSign size={20} color="#10B981" />
+                  <DollarSign size={20} color={theme.colors.success} />
                   <Text style={styles.subscriptionPrice}>
                     ${subscription.price}
                   </Text>
@@ -279,13 +500,13 @@ export default function SubscriptionsScreen() {
                   </Text>
                 </View>
                 <View style={styles.metaRow}>
-                  <Calendar size={14} color="#6B7280" />
+                  <Calendar size={14} color={theme.colors.textSecondary} />
                   <Text style={styles.metaText}>
                     {subscription.duration_days} days ({subscription.duration_months} month{subscription.duration_months > 1 ? 's' : ''})
                   </Text>
                 </View>
                 <View style={styles.metaRow}>
-                  <Users size={14} color="#6B7280" />
+                  <Users size={14} color={theme.colors.textSecondary} />
                   <Text style={styles.metaText}>
                     {subscription.subscriber_count || 0} active subscriber{subscription.subscriber_count !== 1 ? 's' : ''}
                   </Text>
@@ -296,13 +517,13 @@ export default function SubscriptionsScreen() {
                   onPress={() => editSubscription(subscription)}
                   style={styles.actionButton}
                 >
-                  <Edit size={20} color="#3B82F6" />
+                  <Edit size={20} color={theme.colors.primary} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => deleteSubscription(subscription)}
                   style={styles.actionButton}
                 >
-                  <Trash2 size={20} color="#EF4444" />
+                  <Trash2 size={20} color={theme.colors.error} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -326,7 +547,7 @@ export default function SubscriptionsScreen() {
 
         {subscriptions.length === 0 && (
           <Card style={styles.noSubscriptionsCard}>
-            <CreditCard size={64} color="#9CA3AF" />
+            <CreditCard size={64} color={theme.colors.textSecondary} />
             <Text style={styles.noSubscriptionsText}>No subscription plans yet</Text>
             <Text style={styles.noSubscriptionsSubtext}>
               Create your first plan to start managing memberships
@@ -346,7 +567,7 @@ export default function SubscriptionsScreen() {
           style={styles.fab}
           onPress={() => setShowAddSubscription(true)}
         >
-          <Plus size={24} color="#ffffff" />
+          <Plus size={24} color={theme.colors.card} />
         </TouchableOpacity>
       )}
 
@@ -363,7 +584,7 @@ export default function SubscriptionsScreen() {
               {editingSubscription ? 'Edit Subscription Plan' : 'Create Subscription Plan'}
             </Text>
             <TouchableOpacity onPress={resetForm}>
-              <X size={24} color="#6B7280" />
+              <X size={24} color={theme.colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -372,7 +593,7 @@ export default function SubscriptionsScreen() {
             <TextInput
               style={styles.input}
               placeholder="e.g., Monthly Premium, Annual Basic"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.colors.textSecondary}
               value={newSubscription.name}
               onChangeText={(text) => setNewSubscription({ ...newSubscription, name: text })}
             />
@@ -381,7 +602,7 @@ export default function SubscriptionsScreen() {
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="Brief description of this plan..."
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.colors.textSecondary}
               value={newSubscription.description}
               onChangeText={(text) => setNewSubscription({ ...newSubscription, description: text })}
               multiline
@@ -395,7 +616,7 @@ export default function SubscriptionsScreen() {
                 <TextInput
                   style={styles.input}
                   placeholder="e.g., 1, 3, 12"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={theme.colors.textSecondary}
                   value={newSubscription.duration_months}
                   onChangeText={(text) => setNewSubscription({ ...newSubscription, duration_months: text })}
                   keyboardType="numeric"
@@ -406,7 +627,7 @@ export default function SubscriptionsScreen() {
                 <TextInput
                   style={styles.input}
                   placeholder="e.g., 49.99"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={theme.colors.textSecondary}
                   value={newSubscription.price}
                   onChangeText={(text) => setNewSubscription({ ...newSubscription, price: text })}
                   keyboardType="decimal-pad"
@@ -418,7 +639,7 @@ export default function SubscriptionsScreen() {
             <TextInput
               style={[styles.input, styles.textAreaLarge]}
               placeholder={'Access to all equipment\nPersonal trainer sessions\nNutrition guidance\nLocker access\nGroup classes'}
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.colors.textSecondary}
               value={newSubscription.features}
               onChangeText={(text) => setNewSubscription({ ...newSubscription, features: text })}
               multiline
@@ -440,217 +661,6 @@ export default function SubscriptionsScreen() {
         </View>
       </Modal>
     </View>
+    </SafeAreaWrapper>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#6B7280',
-  },
-  header: {
-    padding: 24,
-    paddingTop: 60,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#6B7280',
-    marginTop: 4,
-  },
-  subscriptionCard: {
-    marginHorizontal: 24,
-    marginBottom: 16,
-    padding: 20,
-  },
-  subscriptionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  subscriptionInfo: {
-    flex: 1,
-  },
-  subscriptionName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 8,
-  },
-  priceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  subscriptionPrice: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#10B981',
-    marginLeft: 4,
-  },
-  subscriptionDuration: {
-    fontSize: 16,
-    color: '#6B7280',
-    marginLeft: 4,
-    marginTop: 8,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-    gap: 6,
-  },
-  metaText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  subscriptionActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  actionButton: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: '#F3F4F6',
-  },
-  description: {
-    fontSize: 14,
-    color: '#6B7280',
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-  features: {
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-  },
-  featuresTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  featureItem: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 6,
-    lineHeight: 20,
-  },
-  noSubscriptionsCard: {
-    marginHorizontal: 24,
-    alignItems: 'center',
-    paddingVertical: 48,
-  },
-  noSubscriptionsText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#374151',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  noSubscriptionsSubtext: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginBottom: 24,
-    paddingHorizontal: 32,
-    lineHeight: 20,
-  },
-  createFirstButton: {
-    minWidth: 200,
-  },
-  fab: {
-    position: 'absolute',
-    bottom: 24,
-    right: 24,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#3B82F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#3B82F6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 24,
-    paddingTop: 60,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  modalContent: {
-    flex: 1,
-    padding: 24,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    marginBottom: 20,
-    backgroundColor: '#ffffff',
-    color: '#111827',
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  textAreaLarge: {
-    minHeight: 120,
-    textAlignVertical: 'top',
-  },
-  inputRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  inputHalf: {
-    flex: 1,
-  },
-  helperText: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginBottom: 20,
-    lineHeight: 18,
-  },
-  addButton: {
-    marginTop: 8,
-  },
-});

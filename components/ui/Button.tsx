@@ -1,5 +1,6 @@
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, ViewStyle, TextStyle } from 'react-native';
+import { useTheme } from '@/contexts/ThemeContext';
 
 interface ButtonProps {
   title: string;
@@ -22,9 +23,40 @@ export function Button({
   style,
   textStyle,
 }: ButtonProps) {
+  const { theme } = useTheme();
+  
+  const getButtonStyle = () => {
+    switch (variant) {
+      case 'primary':
+        return { backgroundColor: theme.colors.primary };
+      case 'secondary':
+        return { backgroundColor: theme.colors.success };
+      case 'outline':
+        return { 
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          borderColor: theme.colors.primary,
+        };
+      default:
+        return { backgroundColor: theme.colors.primary };
+    }
+  };
+
+  const getTextColor = () => {
+    switch (variant) {
+      case 'primary':
+      case 'secondary':
+        return theme.colors.card;
+      case 'outline':
+        return theme.colors.primary;
+      default:
+        return theme.colors.card;
+    }
+  };
+
   const buttonStyle = [
     styles.button,
-    styles[variant],
+    getButtonStyle(),
     styles[size],
     (disabled || isLoading) && styles.disabled,
     style,
@@ -32,7 +64,7 @@ export function Button({
 
   const textStyles = [
     styles.text,
-    styles[`${variant}Text`],
+    { color: getTextColor() },
     styles[`${size}Text`],
     textStyle,
   ];
@@ -45,7 +77,7 @@ export function Button({
       activeOpacity={0.8}
     >
       {isLoading ? (
-        <ActivityIndicator color={variant === 'primary' ? '#ffffff' : '#3B82F6'} />
+        <ActivityIndicator color={getTextColor()} />
       ) : (
         <Text style={textStyles}>{title}</Text>
       )}
@@ -64,17 +96,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
-  },
-  primary: {
-    backgroundColor: '#3B82F6',
-  },
-  secondary: {
-    backgroundColor: '#10B981',
-  },
-  outline: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#3B82F6',
   },
   small: {
     paddingHorizontal: 16,
@@ -96,15 +117,6 @@ const styles = StyleSheet.create({
   text: {
     fontWeight: '600',
     fontFamily: 'Inter-SemiBold',
-  },
-  primaryText: {
-    color: '#ffffff',
-  },
-  secondaryText: {
-    color: '#ffffff',
-  },
-  outlineText: {
-    color: '#3B82F6',
   },
   smallText: {
     fontSize: 14,

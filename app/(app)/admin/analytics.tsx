@@ -1,19 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  View, Text, StyleSheet, ScrollView, RefreshControl, 
-  ActivityIndicator, Dimensions 
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  RefreshControl,
+  ActivityIndicator,
+  Dimensions,
+  Platform,
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
 import { Card } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
+import SafeAreaWrapper from '@/components/SafeAreaWrapper';
 import { BarChart, LineChart } from 'react-native-chart-kit';
-import { 
-  TrendingUp, Users, Dumbbell, DollarSign, Activity, 
-  Clock, Calendar, Target 
+import {
+  TrendingUp,
+  Users,
+  Dumbbell,
+  DollarSign,
+  Activity,
+  Clock,
+  Calendar,
+  Target,
 } from 'lucide-react-native';
 
-const screenWidth = Dimensions.get('window').width;
 
 interface Analytics {
   monthlyRevenue: number;
@@ -29,7 +42,10 @@ interface Analytics {
   totalCheckIns: number;
 }
 
+const screenWidth = Dimensions.get('window').width;
+
 export default function AnalyticsScreen() {
+  const { theme } = useTheme();
   const { profile, gym } = useAuth();
   const [analytics, setAnalytics] = useState<Analytics>({
     monthlyRevenue: 0,
@@ -44,18 +60,18 @@ export default function AnalyticsScreen() {
     activeSubscriptions: 0,
     totalCheckIns: 0,
   });
-  
+
   const [chartData, setChartData] = useState({
     memberGrowth: {
       labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-      datasets: [{ data: [0, 0, 0, 0, 0, 0] }],
+      datasets: [{ data: [0, 0, 0, 0, 0, 1] }], // At least one non-zero value
     },
     revenue: {
       labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-      datasets: [{ data: [0, 0, 0, 0, 0, 0] }],
+      datasets: [{ data: [0, 0, 0, 0, 0, 1] }], // At least one non-zero value
     },
   });
-  
+
   const [refreshing, setRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -71,30 +87,50 @@ export default function AnalyticsScreen() {
     setRefreshing(false);
   };
 
+  // Helper function to ensure valid number
+  const ensureValidNumber = (value: unknown, defaultValue: number = 0): number => {
+    const num = Number(value);
+    return isNaN(num) || !isFinite(num) ? defaultValue : num;
+  };
+
+  // Helper function to ensure valid chart data
+  const ensureValidChartData = (data: number[]): number[] => {
+    const validData = data.map(val => ensureValidNumber(val, 0));
+    const hasAnyData = validData.some(val => val > 0);
+    
+    // If all zeros, add a small value to prevent rendering issues
+    if (!hasAnyData) {
+      validData[validData.length - 1] = 1;
+    }
+    
+    return validData;
+  };
+
   const fetchAnalytics = async () => {
     setIsLoading(true);
     try {
       const isGymOwner = profile?.role === 'gym_owner';
       const gymId = profile?.gym_id;
 
-      console.log('Fetching analytics for:', { isGymOwner, gymId });
+      console.log('📊 Fetching analytics for:', { isGymOwner, gymId });
 
       // Fetch members with gym filter
       let membersQuery = supabase
         .from('profiles')
         .select('created_at, id')
         .eq('role', 'member');
-      
+
       if (isGymOwner && gymId) {
         membersQuery = membersQuery.eq('gym_id', gymId);
       }
-      
-      const { data: members } = await membersQuery;
+
+      const { data: members, error: membersError } = await membersQuery;
+      if (membersError) {
+        console.error('Error fetching members:', membersError);
+      }
 
       // Fetch user subscriptions for revenue calculation
-      let subscriptionsQuery = supabase
-        .from('user_subscriptions')
-        .select(`
+      let subscriptionsQuery = supabase.from('user_subscriptions').select(`
           amount_paid,
           payment_status,
           payment_date,
@@ -102,39 +138,41 @@ export default function AnalyticsScreen() {
           start_date,
           profiles!inner(gym_id)
         `);
-      
+
       if (isGymOwner && gymId) {
         subscriptionsQuery = subscriptionsQuery.eq('profiles.gym_id', gymId);
       }
-      
-      const { data: userSubscriptions } = await subscriptionsQuery;
+
+      const { data: userSubscriptions, error: subsError } = await subscriptionsQuery;
+      if (subsError) {
+        console.error('Error fetching subscriptions:', subsError);
+      }
 
       // Calculate revenue
       const currentMonth = new Date().getMonth();
       const currentYear = new Date().getFullYear();
 
       const monthlyRevenue = (userSubscriptions || [])
-        .filter(sub => {
-          if (sub.payment_status !== 'paid') return false;
-          if (!sub.payment_date) return false;
+        .filter((sub) => {
+          if (!sub || sub.payment_status !== 'paid' || !sub.payment_date) return false;
           const paymentDate = new Date(sub.payment_date);
-          return paymentDate.getMonth() === currentMonth && 
-                 paymentDate.getFullYear() === currentYear;
+          return (
+            paymentDate.getMonth() === currentMonth &&
+            paymentDate.getFullYear() === currentYear
+          );
         })
-        .reduce((sum, sub) => sum + Number(sub.amount_paid || 0), 0);
+        .reduce((sum, sub) => sum + ensureValidNumber(sub.amount_paid, 0), 0);
 
       const totalRevenue = (userSubscriptions || [])
-        .filter(sub => sub.payment_status === 'paid')
-        .reduce((sum, sub) => sum + Number(sub.amount_paid || 0), 0);
+        .filter((sub) => sub && sub.payment_status === 'paid')
+        .reduce((sum, sub) => sum + ensureValidNumber(sub.amount_paid, 0), 0);
 
-      const activeSubscriptions = (userSubscriptions || [])
-        .filter(sub => sub.is_active === true)
-        .length;
+      const activeSubscriptions = (userSubscriptions || []).filter(
+        (sub) => sub && sub.is_active === true
+      ).length;
 
       // Fetch workout logs
-      let workoutLogsQuery = supabase
-        .from('workout_logs')
-        .select(`
+      let workoutLogsQuery = supabase.from('workout_logs').select(`
           duration_minutes,
           calories_burned,
           completed_at,
@@ -142,55 +180,72 @@ export default function AnalyticsScreen() {
           workout_id,
           profiles!inner(gym_id)
         `);
-      
+
       if (isGymOwner && gymId) {
         workoutLogsQuery = workoutLogsQuery.eq('profiles.gym_id', gymId);
       }
-      
-      const { data: workoutLogs } = await workoutLogsQuery;
+
+      const { data: workoutLogs, error: workoutError } = await workoutLogsQuery;
+      if (workoutError) {
+        console.error('Error fetching workouts:', workoutError);
+      }
 
       // Fetch attendance
       let attendanceQuery = supabase
         .from('attendance')
         .select('check_in_time, user_id');
-      
+
       if (isGymOwner && gymId) {
         attendanceQuery = attendanceQuery.eq('gym_id', gymId);
       }
-      
-      const { data: attendance } = await attendanceQuery;
+
+      const { data: attendance, error: attendanceError } = await attendanceQuery;
+      if (attendanceError) {
+        console.error('Error fetching attendance:', attendanceError);
+      }
 
       // Calculate member growth
       const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
       const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
 
-      const newMembersThisMonth = (members || []).filter(m => {
+      const newMembersThisMonth = (members || []).filter((m) => {
+        if (!m || !m.created_at) return false;
         const createdDate = new Date(m.created_at);
-        return createdDate.getMonth() === currentMonth && 
-               createdDate.getFullYear() === currentYear;
+        return (
+          createdDate.getMonth() === currentMonth &&
+          createdDate.getFullYear() === currentYear
+        );
       }).length;
-      
-      const newMembersLastMonth = (members || []).filter(m => {
+
+      const newMembersLastMonth = (members || []).filter((m) => {
+        if (!m || !m.created_at) return false;
         const createdDate = new Date(m.created_at);
-        return createdDate.getMonth() === lastMonth && 
-               createdDate.getFullYear() === lastMonthYear;
+        return (
+          createdDate.getMonth() === lastMonth &&
+          createdDate.getFullYear() === lastMonthYear
+        );
       }).length;
-      
-      const growthRate = newMembersLastMonth > 0 
-        ? ((newMembersThisMonth - newMembersLastMonth) / newMembersLastMonth * 100)
-        : newMembersThisMonth > 0 ? 100 : 0;
+
+      const growthRate =
+        newMembersLastMonth > 0
+          ? ((newMembersThisMonth - newMembersLastMonth) / newMembersLastMonth) * 100
+          : newMembersThisMonth > 0
+          ? 100
+          : 0;
 
       // Calculate average workouts per member
       const totalMembers = members?.length || 0;
       const totalWorkouts = workoutLogs?.length || 0;
-      const avgWorkouts = totalMembers > 0 
-        ? totalWorkouts / totalMembers 
-        : 0;
+      const avgWorkouts = totalMembers > 0 ? totalWorkouts / totalMembers : 0;
 
       // Calculate average session duration
-      const avgSessionDuration = workoutLogs && workoutLogs.length > 0
-        ? workoutLogs.reduce((sum, log) => sum + (log.duration_minutes || 0), 0) / workoutLogs.length
-        : 0;
+      const avgSessionDuration =
+        workoutLogs && workoutLogs.length > 0
+          ? workoutLogs.reduce(
+              (sum, log) => sum + ensureValidNumber(log?.duration_minutes, 0),
+              0
+            ) / workoutLogs.length
+          : 0;
 
       // Calculate peak hours
       const peakHours = calculatePeakHours(workoutLogs || []);
@@ -206,17 +261,17 @@ export default function AnalyticsScreen() {
       const revenueData = calculateMonthlyRevenue(userSubscriptions || []);
 
       setAnalytics({
-        monthlyRevenue: Math.round(monthlyRevenue * 100) / 100,
-        totalRevenue: Math.round(totalRevenue * 100) / 100,
-        newMembers: newMembersThisMonth,
-        avgWorkouts: Math.round(avgWorkouts * 10) / 10,
-        growthRate: Math.round(growthRate),
+        monthlyRevenue: ensureValidNumber(monthlyRevenue, 0),
+        totalRevenue: ensureValidNumber(totalRevenue, 0),
+        newMembers: ensureValidNumber(newMembersThisMonth, 0),
+        avgWorkouts: ensureValidNumber(avgWorkouts, 0),
+        growthRate: ensureValidNumber(growthRate, 0),
         peakHours,
         popularWorkout,
-        avgSessionDuration: Math.round(avgSessionDuration),
-        retentionRate: Math.round(retentionRate),
-        activeSubscriptions,
-        totalCheckIns: attendance?.length || 0,
+        avgSessionDuration: ensureValidNumber(avgSessionDuration, 0),
+        retentionRate: ensureValidNumber(retentionRate, 0),
+        activeSubscriptions: ensureValidNumber(activeSubscriptions, 0),
+        totalCheckIns: ensureValidNumber(attendance?.length, 0),
       });
 
       setChartData({
@@ -224,120 +279,136 @@ export default function AnalyticsScreen() {
         revenue: revenueData,
       });
 
+      console.log('✅ Analytics loaded successfully');
     } catch (error) {
-      console.error('Error fetching analytics:', error);
+      console.error('❌ Error fetching analytics:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const calculateMonthlyGrowth = (members: any[]) => {
+  const calculateMonthlyGrowth = (members: { created_at: string }[]) => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
     const currentYear = new Date().getFullYear();
-    
+
     const monthlyData = months.map((_, index) => {
-      return members.filter(member => {
-        const memberDate = new Date(member.created_at);
-        return memberDate.getMonth() === index && 
-               memberDate.getFullYear() === currentYear;
+      return (members || []).filter((member) => {
+        if (!member || !member.created_at) return false;
+        try {
+          const memberDate = new Date(member.created_at);
+          return (
+            memberDate.getMonth() === index &&
+            memberDate.getFullYear() === currentYear
+          );
+        } catch {
+          return false;
+        }
       }).length;
     });
 
-    // Ensure at least some data for chart
-    const hasData = monthlyData.some(val => val > 0);
-    if (!hasData) {
-      monthlyData[new Date().getMonth()] = 1;
-    }
+    const validData = ensureValidChartData(monthlyData);
 
     return {
       labels: months,
-      datasets: [{ data: monthlyData.map(val => val || 0) }],
+      datasets: [{ data: validData }],
     };
   };
 
-  const calculateMonthlyRevenue = (subscriptions: any[]) => {
+  const calculateMonthlyRevenue = (subscriptions: { payment_status: string; payment_date: string; amount_paid: number }[]) => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
     const currentYear = new Date().getFullYear();
-    
+
     const monthlyData = months.map((_, index) => {
-      const monthRevenue = subscriptions
-        .filter(sub => {
-          if (sub.payment_status !== 'paid' || !sub.payment_date) return false;
-          const paymentDate = new Date(sub.payment_date);
-          return paymentDate.getMonth() === index && 
-                 paymentDate.getFullYear() === currentYear;
+      const monthRevenue = (subscriptions || [])
+        .filter((sub) => {
+          if (!sub || sub.payment_status !== 'paid' || !sub.payment_date) return false;
+          try {
+            const paymentDate = new Date(sub.payment_date);
+            return (
+              paymentDate.getMonth() === index &&
+              paymentDate.getFullYear() === currentYear
+            );
+          } catch {
+            return false;
+          }
         })
-        .reduce((sum, sub) => sum + Number(sub.amount_paid || 0), 0);
-      
+        .reduce((sum, sub) => sum + ensureValidNumber(sub.amount_paid, 0), 0);
+
       return Math.round(monthRevenue);
     });
 
-    // Ensure at least some data for chart
-    const hasData = monthlyData.some(val => val > 0);
-    if (!hasData) {
-      monthlyData[new Date().getMonth()] = 100;
-    }
+    const validData = ensureValidChartData(monthlyData);
 
     return {
       labels: months,
-      datasets: [{ data: monthlyData.map(val => val || 0) }],
+      datasets: [{ data: validData }],
     };
   };
 
-  const calculatePeakHours = (workoutLogs: any[]) => {
-    if (!workoutLogs.length) return 'No data yet';
-    
+  const calculatePeakHours = (workoutLogs: { completed_at: string }[]) => {
+    if (!workoutLogs || workoutLogs.length === 0) return 'No data yet';
+
     const hourCounts: { [key: number]: number } = {};
-    
-    workoutLogs.forEach(log => {
-      const hour = new Date(log.completed_at).getHours();
-      hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+
+    workoutLogs.forEach((log) => {
+      if (!log || !log.completed_at) return;
+      try {
+        const hour = new Date(log.completed_at).getHours();
+        if (!isNaN(hour)) {
+          hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+        }
+      } catch (error) {
+        console.error('Error parsing date:', error);
+      }
     });
-    
+
     if (Object.keys(hourCounts).length === 0) return 'No data yet';
-    
+
     const peakHour = parseInt(
-      Object.keys(hourCounts).reduce((a, b) => 
+      Object.keys(hourCounts).reduce((a, b) =>
         hourCounts[parseInt(a)] > hourCounts[parseInt(b)] ? a : b
       )
     );
-    
+
     const formatHour = (hour: number) => {
       const period = hour >= 12 ? 'PM' : 'AM';
       const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
       return `${displayHour}:00 ${period}`;
     };
-    
+
     return `${formatHour(peakHour)} - ${formatHour(peakHour + 2)}`;
   };
 
-  const getPopularWorkout = async (workoutLogs: any[], gymId: string | null | undefined) => {
+  const getPopularWorkout = async (
+    workoutLogs: { workout_id: string }[]
+    // gymId: string | null | undefined
+  ) => {
     try {
       if (!workoutLogs || workoutLogs.length === 0) return 'No workouts yet';
-      
-      const workoutCounts: { [key: string]: { name: string; count: number } } = {};
-      
+
+      const workoutCounts: { [key: string]: number } = {};
+
       // Count workout occurrences
-      workoutLogs.forEach(log => {
+      workoutLogs.forEach((log) => {
+        if (!log || !log.workout_id) return;
         const workoutId = log.workout_id;
-        if (!workoutCounts[workoutId]) {
-          workoutCounts[workoutId] = { name: '', count: 0 };
-        }
-        workoutCounts[workoutId].count++;
+        workoutCounts[workoutId] = (workoutCounts[workoutId] || 0) + 1;
       });
-      
+
+      if (Object.keys(workoutCounts).length === 0) return 'No workouts yet';
+
       // Get most popular workout ID
-      const popularId = Object.keys(workoutCounts).reduce((a, b) => 
-        workoutCounts[a].count > workoutCounts[b].count ? a : b
+      const popularId = Object.keys(workoutCounts).reduce((a, b) =>
+        workoutCounts[a] > workoutCounts[b] ? a : b
       );
-      
+
       // Fetch workout name
       const { data: workout } = await supabase
         .from('workouts')
         .select('name')
         .eq('id', popularId)
         .single();
-      
+
       return workout?.name || 'Unknown workout';
     } catch (error) {
       console.error('Error getting popular workout:', error);
@@ -345,53 +416,178 @@ export default function AnalyticsScreen() {
     }
   };
 
-  const calculateRetentionRate = (subscriptions: any[]) => {
+  const calculateRetentionRate = (subscriptions: { is_active: boolean }[]) => {
     if (!subscriptions || subscriptions.length === 0) return 0;
-    
-    const activeCount = subscriptions.filter(sub => sub.is_active).length;
+
+    const activeCount = subscriptions.filter((sub) => sub && sub.is_active).length;
     const totalCount = subscriptions.length;
-    
+
     return totalCount > 0 ? (activeCount / totalCount) * 100 : 0;
   };
 
+  // Convert hex to RGB for chart config
+  const hexToRgb = (hex: string) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result
+      ? {
+          r: parseInt(result[1], 16),
+          g: parseInt(result[2], 16),
+          b: parseInt(result[3], 16),
+        }
+      : { r: 59, g: 130, b: 246 };
+  };
+
+  const primaryRgb = hexToRgb(theme.colors.primary);
+  const textSecondaryRgb = hexToRgb(theme.colors.textSecondary);
+
   const chartConfig = {
-    backgroundColor: '#ffffff',
-    backgroundGradientFrom: '#ffffff',
-    backgroundGradientTo: '#ffffff',
+    backgroundColor: theme.colors.card,
+    backgroundGradientFrom: theme.colors.card,
+    backgroundGradientTo: theme.colors.card,
     decimalPlaces: 0,
-    color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
-    labelColor: (opacity = 1) => `rgba(107, 114, 128, ${opacity})`,
+    color: (opacity = 1) => `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, ${opacity})`,
+    labelColor: (opacity = 1) => `rgba(${textSecondaryRgb.r}, ${textSecondaryRgb.g}, ${textSecondaryRgb.b}, ${opacity})`,
     style: {
       borderRadius: 16,
     },
     propsForDots: {
       r: '4',
       strokeWidth: '2',
-      stroke: '#3B82F6',
+      stroke: theme.colors.primary,
     },
   };
 
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: theme.colors.background,
+    },
+    loadingText: {
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+      marginTop: 12,
+    },
+    header: {
+      padding: 24,
+      paddingTop: Platform.OS === 'ios' ? 16 : 24,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    subtitle: {
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+    },
+    section: {
+      marginBottom: 8,
+    },
+    sectionTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: theme.colors.text,
+      paddingHorizontal: 24,
+      marginBottom: 12,
+    },
+    statsGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      paddingHorizontal: 12,
+      justifyContent: 'space-between',
+    },
+    chartCard: {
+      marginHorizontal: 24,
+      marginBottom: 24,
+      padding: 20,
+    },
+    chartTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 4,
+    },
+    chartSubtitle: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginBottom: 16,
+    },
+    chart: {
+      borderRadius: 16,
+      marginVertical: 8,
+    },
+    insightsCard: {
+      marginHorizontal: 24,
+      marginBottom: 24,
+      padding: 20,
+    },
+    cardTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 16,
+    },
+    insightItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+      gap: 12,
+    },
+    insightContent: {
+      flex: 1,
+    },
+    insightTitle: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginBottom: 2,
+    },
+    insightValue: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+  });
+
   if (isLoading && !refreshing) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={styles.loadingText}>Loading analytics...</Text>
-      </View>
+      <SafeAreaWrapper>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.loadingText}>Loading analytics...</Text>
+        </View>
+      </SafeAreaWrapper>
     );
   }
 
   return (
-    <ScrollView 
-      style={styles.container} 
+    <SafeAreaWrapper>
+    <ScrollView
+      style={styles.container}
       showsVerticalScrollIndicator={false}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        <RefreshControl 
+          refreshing={refreshing} 
+          onRefresh={onRefresh}
+          tintColor={theme.colors.primary}
+          colors={[theme.colors.primary]}
+        />
       }
     >
       <View style={styles.header}>
         <Text style={styles.title}>Analytics</Text>
         <Text style={styles.subtitle}>
-          {gym?.name ? `${gym.name} insights and metrics` : 'Performance insights and metrics'}
+          {gym?.name
+            ? `${gym.name} insights and metrics`
+            : 'Performance insights and metrics'}
         </Text>
       </View>
 
@@ -401,28 +597,28 @@ export default function AnalyticsScreen() {
         <View style={styles.statsGrid}>
           <StatCard
             title="Monthly Revenue"
-            value={`$${analytics.monthlyRevenue.toLocaleString()}`}
-            icon={<DollarSign size={24} color="#10B981" />}
-            color="#10B981"
+            value={`$${Math.round(analytics.monthlyRevenue).toLocaleString()}`}
+            icon={<DollarSign size={24} color={theme.colors.success} />}
+            color={theme.colors.success}
           />
           <StatCard
             title="Total Revenue"
-            value={`$${analytics.totalRevenue.toLocaleString()}`}
-            icon={<Target size={24} color="#8B5CF6" />}
-            color="#8B5CF6"
+            value={`$${Math.round(analytics.totalRevenue).toLocaleString()}`}
+            icon={<Target size={24} color={theme.colors.accent} />}
+            color={theme.colors.accent}
           />
           <StatCard
             title="Active Plans"
             value={analytics.activeSubscriptions}
             unit="subscribers"
-            icon={<Users size={24} color="#3B82F6" />}
-            color="#3B82F6"
+            icon={<Users size={24} color={theme.colors.primary} />}
+            color={theme.colors.primary}
           />
           <StatCard
             title="Retention"
-            value={`${analytics.retentionRate}%`}
-            icon={<TrendingUp size={24} color="#F59E0B" />}
-            color="#F59E0B"
+            value={`${Math.round(analytics.retentionRate)}%`}
+            icon={<TrendingUp size={24} color={theme.colors.warning} />}
+            color={theme.colors.warning}
           />
         </View>
       </View>
@@ -435,29 +631,29 @@ export default function AnalyticsScreen() {
             title="New Members"
             value={analytics.newMembers}
             unit="this month"
-            icon={<Users size={24} color="#3B82F6" />}
-            color="#3B82F6"
+            icon={<Users size={24} color={theme.colors.primary} />}
+            color={theme.colors.primary}
           />
           <StatCard
             title="Growth Rate"
-            value={`${analytics.growthRate >= 0 ? '+' : ''}${analytics.growthRate}%`}
+            value={`${analytics.growthRate >= 0 ? '+' : ''}${Math.round(analytics.growthRate)}%`}
             unit="vs last month"
-            icon={<TrendingUp size={24} color="#10B981" />}
-            color="#10B981"
+            icon={<TrendingUp size={24} color={theme.colors.success} />}
+            color={theme.colors.success}
           />
           <StatCard
             title="Check-ins"
             value={analytics.totalCheckIns}
             unit="total"
-            icon={<Calendar size={24} color="#06B6D4" />}
-            color="#06B6D4"
+            icon={<Calendar size={24} color={theme.colors.accent} />}
+            color={theme.colors.accent}
           />
           <StatCard
             title="Avg Workouts"
-            value={analytics.avgWorkouts}
+            value={Math.round(analytics.avgWorkouts * 10) / 10}
             unit="per member"
-            icon={<Dumbbell size={24} color="#8B5CF6" />}
-            color="#8B5CF6"
+            icon={<Dumbbell size={24} color={theme.colors.accent} />}
+            color={theme.colors.accent}
           />
         </View>
       </View>
@@ -465,11 +661,15 @@ export default function AnalyticsScreen() {
       {/* Revenue Chart */}
       <Card style={styles.chartCard}>
         <Text style={styles.chartTitle}>Monthly Revenue</Text>
-        <Text style={styles.chartSubtitle}>Revenue from paid subscriptions (USD)</Text>
+        <Text style={styles.chartSubtitle}>
+          Revenue from paid subscriptions (USD)
+        </Text>
         <BarChart
           data={chartData.revenue}
           width={screenWidth - 80}
           height={220}
+          yAxisLabel="$"
+          yAxisSuffix=""
           chartConfig={chartConfig}
           style={styles.chart}
           verticalLabelRotation={0}
@@ -480,7 +680,9 @@ export default function AnalyticsScreen() {
       {/* Member Growth Chart */}
       <Card style={styles.chartCard}>
         <Text style={styles.chartTitle}>Member Growth</Text>
-        <Text style={styles.chartSubtitle}>New member registrations by month</Text>
+        <Text style={styles.chartSubtitle}>
+          New member registrations by month
+        </Text>
         <LineChart
           data={chartData.memberGrowth}
           width={screenWidth - 80}
@@ -495,9 +697,9 @@ export default function AnalyticsScreen() {
       {/* Performance Insights */}
       <Card style={styles.insightsCard}>
         <Text style={styles.cardTitle}>Performance Insights</Text>
-        
+
         <View style={styles.insightItem}>
-          <Clock size={20} color="#6B7280" />
+          <Clock size={20} color={theme.colors.textSecondary} />
           <View style={styles.insightContent}>
             <Text style={styles.insightTitle}>Peak Hours</Text>
             <Text style={styles.insightValue}>{analytics.peakHours}</Text>
@@ -505,7 +707,7 @@ export default function AnalyticsScreen() {
         </View>
 
         <View style={styles.insightItem}>
-          <Dumbbell size={20} color="#6B7280" />
+          <Dumbbell size={20} color={theme.colors.textSecondary} />
           <View style={styles.insightContent}>
             <Text style={styles.insightTitle}>Most Popular Workout</Text>
             <Text style={styles.insightValue}>{analytics.popularWorkout}</Text>
@@ -513,113 +715,16 @@ export default function AnalyticsScreen() {
         </View>
 
         <View style={styles.insightItem}>
-          <Activity size={20} color="#6B7280" />
+          <Activity size={20} color={theme.colors.textSecondary} />
           <View style={styles.insightContent}>
             <Text style={styles.insightTitle}>Average Session Duration</Text>
-            <Text style={styles.insightValue}>{analytics.avgSessionDuration} minutes</Text>
+            <Text style={styles.insightValue}>
+              {Math.round(analytics.avgSessionDuration)} minutes
+            </Text>
           </View>
         </View>
       </Card>
     </ScrollView>
+    </SafeAreaWrapper>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#6B7280',
-    marginTop: 12,
-  },
-  header: {
-    padding: 24,
-    paddingTop: 60,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#6B7280',
-    marginTop: 4,
-  },
-  section: {
-    marginBottom: 8,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-    paddingHorizontal: 24,
-    marginBottom: 12,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 12,
-    justifyContent: 'space-between',
-  },
-  chartCard: {
-    marginHorizontal: 24,
-    marginBottom: 24,
-    padding: 20,
-  },
-  chartTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  chartSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 16,
-  },
-  chart: {
-    borderRadius: 16,
-    marginVertical: 8,
-  },
-  insightsCard: {
-    marginHorizontal: 24,
-    marginBottom: 24,
-    padding: 20,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 16,
-  },
-  insightItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-    gap: 12,
-  },
-  insightContent: {
-    flex: 1,
-  },
-  insightTitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 2,
-  },
-  insightValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
-});
