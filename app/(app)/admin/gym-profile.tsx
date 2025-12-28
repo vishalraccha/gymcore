@@ -18,7 +18,7 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import SafeAreaWrapper from "@/components/SafeAreaWrapper";
 import ThemePicker from "@/components/ThemePicker";
-import { Building2, MapPin, Phone, Mail, FileText, LogOut, Moon } from "lucide-react-native";
+import { Building2, MapPin, Phone, Mail, FileText, LogOut, Moon, CreditCard, Banknote } from "lucide-react-native";
 
 interface GymData {
   id?: string;
@@ -42,6 +42,16 @@ export default function GymProfileScreen() {
     description: "",
     logo_url: "",
   });
+  const [paymentAccount, setPaymentAccount] = useState({
+    razorpay_account_id: "",
+    razorpay_key_id: "",
+    razorpay_key_secret: "",
+    bank_account_number: "",
+    bank_ifsc_code: "",
+    bank_name: "",
+    account_holder_name: "",
+    payment_gateway: "razorpay" as "razorpay" | "bank_transfer",
+  });
 
   const [hasGym, setHasGym] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -51,6 +61,7 @@ export default function GymProfileScreen() {
 
   useEffect(() => {
     loadGymData();
+    loadPaymentAccount();
   }, [profile]);
 
   const onRefresh = async () => {
@@ -103,6 +114,76 @@ export default function GymProfileScreen() {
     }
 
     setIsLoading(false);
+  };
+
+  const loadPaymentAccount = async () => {
+    if (!profile?.gym_id) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('gym_payment_accounts')
+        .select('*')
+        .eq('gym_id', profile.gym_id)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        // PGRST116 = no rows returned, which is fine
+        console.error('Error loading payment account:', error);
+        return;
+      }
+
+      if (data) {
+        setPaymentAccount({
+          razorpay_account_id: data.razorpay_account_id || "",
+          razorpay_key_id: data.razorpay_key_id || "",
+          razorpay_key_secret: data.razorpay_key_secret || "",
+          bank_account_number: data.bank_account_number || "",
+          bank_ifsc_code: data.bank_ifsc_code || "",
+          bank_name: data.bank_name || "",
+          account_holder_name: data.account_holder_name || "",
+          payment_gateway: data.payment_gateway || "razorpay",
+        });
+      }
+    } catch (err) {
+      console.error('Error loading payment account:', err);
+    }
+  };
+
+  const savePaymentAccount = async () => {
+    if (!profile?.gym_id) {
+      Alert.alert('Error', 'No gym found');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const { error } = await supabase
+        .from('gym_payment_accounts')
+        .upsert({
+          gym_id: profile.gym_id,
+          razorpay_account_id: paymentAccount.razorpay_account_id || null,
+          razorpay_key_id: paymentAccount.razorpay_key_id || null,
+          razorpay_key_secret: paymentAccount.razorpay_key_secret || null,
+          bank_account_number: paymentAccount.bank_account_number || null,
+          bank_ifsc_code: paymentAccount.bank_ifsc_code || null,
+          bank_name: paymentAccount.bank_name || null,
+          account_holder_name: paymentAccount.account_holder_name || null,
+          payment_gateway: paymentAccount.payment_gateway,
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'gym_id',
+        });
+
+      if (error) throw error;
+
+      Alert.alert('Success', 'Payment account saved successfully');
+    } catch (err) {
+      console.error('Error saving payment account:', err);
+      Alert.alert('Error', 'Failed to save payment account');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const createGym = async () => {
@@ -466,10 +547,30 @@ export default function GymProfileScreen() {
     noGymText: {
       fontSize: 14,
       color: theme.colors.textSecondary,
-      textAlign: 'center',
-      marginBottom: 24,
-      lineHeight: 20,
-      fontFamily: 'Inter-Regular',
+    },
+    paymentGatewayOption: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.background,
+    },
+    paymentGatewayOptionActive: {
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.colors.primary,
+    },
+    paymentGatewayText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    paymentGatewayTextActive: {
+      color: theme.colors.card,
     },
     createButton: {
       minWidth: 200,
@@ -689,6 +790,156 @@ export default function GymProfileScreen() {
           </View>
         )}
       </Card>
+
+      {/* PAYMENT ACCOUNT SECTION */}
+      {hasGym && (
+        <Card style={styles.formCard}>
+          <View style={styles.inputHeader}>
+            <CreditCard size={24} color={theme.colors.primary} />
+            <Text style={styles.formTitle}>Payment Account</Text>
+          </View>
+          <Text style={[styles.inputLabel, { marginBottom: 16, fontSize: 14, fontWeight: '400' }]}>
+            Configure payment settings so member payments go directly to your account
+          </Text>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Payment Gateway</Text>
+            <View style={styles.inputRow}>
+              <TouchableOpacity
+                style={[
+                  styles.paymentGatewayOption,
+                  paymentAccount.payment_gateway === 'razorpay' && styles.paymentGatewayOptionActive,
+                ]}
+                onPress={() => setPaymentAccount({ ...paymentAccount, payment_gateway: 'razorpay' })}
+              >
+                <CreditCard size={20} color={paymentAccount.payment_gateway === 'razorpay' ? theme.colors.card : theme.colors.textSecondary} />
+                <Text style={[
+                  styles.paymentGatewayText,
+                  paymentAccount.payment_gateway === 'razorpay' && styles.paymentGatewayTextActive,
+                ]}>
+                  Razorpay
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.paymentGatewayOption,
+                  paymentAccount.payment_gateway === 'bank_transfer' && styles.paymentGatewayOptionActive,
+                ]}
+                onPress={() => setPaymentAccount({ ...paymentAccount, payment_gateway: 'bank_transfer' })}
+              >
+                <Banknote size={20} color={paymentAccount.payment_gateway === 'bank_transfer' ? theme.colors.card : theme.colors.textSecondary} />
+                <Text style={[
+                  styles.paymentGatewayText,
+                  paymentAccount.payment_gateway === 'bank_transfer' && styles.paymentGatewayTextActive,
+                ]}>
+                  Bank Transfer
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {paymentAccount.payment_gateway === 'razorpay' && (
+            <>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Razorpay Account ID</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="acc_xxxxxxxxxxxx"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  value={paymentAccount.razorpay_account_id}
+                  onChangeText={(text) => setPaymentAccount({ ...paymentAccount, razorpay_account_id: text })}
+                />
+              </View>
+
+              <View style={styles.inputRow}>
+                <View style={styles.inputHalf}>
+                  <Text style={styles.inputLabel}>Razorpay Key ID</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="rzp_test_xxxxx"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={paymentAccount.razorpay_key_id}
+                    onChangeText={(text) => setPaymentAccount({ ...paymentAccount, razorpay_key_id: text })}
+                    secureTextEntry
+                  />
+                </View>
+                <View style={styles.inputHalf}>
+                  <Text style={styles.inputLabel}>Razorpay Key Secret</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Secret key"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={paymentAccount.razorpay_key_secret}
+                    onChangeText={(text) => setPaymentAccount({ ...paymentAccount, razorpay_key_secret: text })}
+                    secureTextEntry
+                  />
+                </View>
+              </View>
+            </>
+          )}
+
+          {paymentAccount.payment_gateway === 'bank_transfer' && (
+            <>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Account Holder Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Account holder name"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  value={paymentAccount.account_holder_name}
+                  onChangeText={(text) => setPaymentAccount({ ...paymentAccount, account_holder_name: text })}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Bank Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Bank name"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  value={paymentAccount.bank_name}
+                  onChangeText={(text) => setPaymentAccount({ ...paymentAccount, bank_name: text })}
+                />
+              </View>
+
+              <View style={styles.inputRow}>
+                <View style={styles.inputHalf}>
+                  <Text style={styles.inputLabel}>Account Number</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Account number"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={paymentAccount.bank_account_number}
+                    onChangeText={(text) => setPaymentAccount({ ...paymentAccount, bank_account_number: text })}
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={styles.inputHalf}>
+                  <Text style={styles.inputLabel}>IFSC Code</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="IFSC code"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    value={paymentAccount.bank_ifsc_code}
+                    onChangeText={(text) => setPaymentAccount({ ...paymentAccount, bank_ifsc_code: text.toUpperCase() })}
+                    autoCapitalize="characters"
+                  />
+                </View>
+              </View>
+            </>
+          )}
+
+          <View style={styles.actionButtons}>
+            <View style={styles.saveButton}>
+              <Button
+                title="Save Payment Account"
+                onPress={savePaymentAccount}
+                isLoading={isSaving}
+              />
+            </View>
+          </View>
+        </Card>
+      )}
 
       {/* QUICK STATS */}
       {hasGym && gymData.created_at && (

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState,useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -19,6 +19,9 @@ import { Card } from '@/components/ui/Card';
 import { User, Shield } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
+
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { supabase } from "@/lib/supabase";
 
 export default function LoginScreen() {
   const { theme } = useTheme();
@@ -44,6 +47,8 @@ export default function LoginScreen() {
       }),
     ]).start();
   }, []);
+
+ 
 
   const styles = StyleSheet.create({
     safeArea: {
@@ -202,6 +207,15 @@ export default function LoginScreen() {
       fontSize: 12,
       color: theme.colors.textSecondary,
     },
+    forgotPasswordContainer: {
+      marginTop: 16,
+      alignItems: 'center',
+    },
+    forgotPasswordText: {
+      fontSize: 14,
+      color: theme.colors.primary,
+      fontWeight: '600',
+    },
   });
 
   const handleLogin = async () => {
@@ -350,6 +364,14 @@ export default function LoginScreen() {
                 isLoading={isLoading}
                 style={styles.loginButton}
               />
+
+              {/* Forgot Password Link */}
+              <TouchableOpacity
+                onPress={() => router.push('/(auth)/forgot-password')}
+                style={styles.forgotPasswordContainer}
+              >
+                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+              </TouchableOpacity>
             </Card>
 
             {/* Footer */}

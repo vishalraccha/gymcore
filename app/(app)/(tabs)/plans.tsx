@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
+import { formatRupees, formatCurrencyNumber } from '@/lib/currency';
 import { 
   getAllPlans, 
   createRazorpayOrder, 
@@ -30,6 +31,7 @@ import {
 } from 'lucide-react-native';
 import SafeAreaWrapper from "@/components/SafeAreaWrapper";
 import { useTheme } from '@/contexts/ThemeContext';
+
 
 const RAZORPAY_KEY = process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_Rp9bIxFjJlsibu';
 
@@ -58,6 +60,8 @@ export default function PlansScreen() {
       setLoading(false);
     }
   };
+
+  
 
   const handlePurchasePlan = async (plan: Plan) => {
     if (!user || !profile) {
@@ -269,12 +273,11 @@ export default function PlansScreen() {
 
         <View style={styles.priceContainer}>
           <View style={styles.priceRow}>
-            <Text style={styles.currency}>₹</Text>
-            <Text style={styles.price}>{plan.price.toFixed(0)}</Text>
+            <Text style={styles.price}>{formatRupees(plan.price)}</Text>
           </View>
           <Text style={styles.duration}>for {plan.duration_days} days</Text>
           <Text style={styles.perDay}>
-            ~₹{(plan.price / plan.duration_days).toFixed(0)}/day
+            ~{formatRupees(plan.price / plan.duration_days)}/day
           </Text>
         </View>
 

@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { createSubscriptionInvoice } from './invoice';
 
 export interface Plan {
   id: string;
@@ -209,6 +210,32 @@ export const verifyAndActivateSubscription = async (
     }
 
     console.log('✅ Subscription activated:', data);
+
+    // Create invoice for the payment
+    try {
+      // Get subscription details to calculate amount
+      const { data: planData } = await supabase
+        .from('subscriptions')
+        .select('price')
+        .eq('id', params.plan_id)
+        .single();
+
+      if (planData) {
+        await createSubscriptionInvoice(
+          params.user_id,
+          params.plan_id,
+          planData.price,
+          'razorpay',
+          params.razorpay_payment_id,
+          undefined // gym_id will be fetched from user profile if needed
+        );
+        console.log('✅ Invoice created for payment');
+      }
+    } catch (invoiceError) {
+      console.error('⚠️ Error creating invoice (non-critical):', invoiceError);
+      // Don't fail the subscription activation if invoice creation fails
+    }
+
     return data;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to activate subscription';
@@ -386,22 +413,52 @@ export async function getUserSubscriptionHistory(userId: string) {
 }
 
 /**
- * Get all active plans
+ * Get all active plans - FIXED to use subscriptions table and filter by gym
  */
 export const getAllPlans = async (): Promise<Plan[]> => {
   try {
-    const { data, error } = await supabase
-      .from('plans')
+    // Get current user's profile to find their gym_id
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('gym_id')
+      .eq('id', user.id)
+      .single();
+
+    // Query subscriptions table (not plans table)
+    let query = supabase
+      .from('subscriptions')
       .select('*')
       .eq('is_active', true)
       .order('price', { ascending: true });
+
+    // Filter by gym_id if user is a member
+    if (profile?.gym_id) {
+      query = query.eq('gym_id', profile.gym_id);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error('Error fetching plans:', error);
       throw error;
     }
 
-    return data || [];
+    // Transform subscriptions to Plan format
+    const plans: Plan[] = (data || []).map((sub: any) => ({
+      id: sub.id,
+      name: sub.name,
+      description: sub.description || '',
+      price: sub.price,
+      currency: sub.currency || 'INR',
+      duration_days: sub.duration_days,
+      features: sub.features || [],
+      is_active: sub.is_active,
+    }));
+
+    return plans;
   } catch (error) {
     console.error('Error fetching plans:', error);
     return [];

@@ -89,8 +89,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(data as Profile);
 
         // if profile has gym_id fetch gym
-        if ((data as Profile)?.gym_id) {
-          await fetchGym((data as Profile).gym_id);
+        const profileData = data as Profile;
+        if (profileData?.gym_id) {
+          await fetchGym(profileData.gym_id);
         } else {
           setGym(null);
         }
@@ -114,9 +115,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // initial session load - RUNS ONLY ONCE ON MOUNT
   useEffect(() => {
     let mounted = true;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setIsLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log("Auth event:", event);
+
+        // Handle token refresh failures
+        if (event === "SIGNED_OUT" || (event as string) === "TOKEN_REFRESH_FAILED") {
+          console.warn("Auth session ended, logging out");
+          await supabase.auth.signOut();
+        }
+
+        setSession(session);
+      }
+    );
     
     (async () => {
       try {
+        // Set timeout fallback to ensure loading always resolves
+        timeoutId = setTimeout(() => {
+          if (mounted) {
+            console.log("⏱️ Auth loading timeout - forcing completion");
+            setIsLoading(false);
+          }
+        }, 3000) as ReturnType<typeof setTimeout>; // 3 second max timeout
+
         const {
           data: { session },
         } = await supabase.auth.getSession();
@@ -125,19 +154,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         setSession(session);
         setUser(session?.user ?? null);
-        if (session?.user) await fetchProfile(session.user.id);
+        
+        // Fetch profile with timeout protection
+        if (session?.user) {
+          try {
+            await Promise.race([
+              fetchProfile(session.user.id),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Profile fetch timeout')), 2000)
+              )
+            ]).catch((err) => {
+              console.log("Profile fetch timeout or error:", err);
+              // Continue even if profile fetch fails
+            });
+          } catch (err) {
+            console.log("Profile fetch error:", err);
+          }
+        }
       } catch (e) {
         console.log("getSession error", e);
       } finally {
+        if (timeoutId) clearTimeout(timeoutId);
         if (mounted) setIsLoading(false);
       }
     })();
 
+    const { data: listener2 } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log("Auth event:", event);
+
+        // Handle token refresh failures
+        if (event === "SIGNED_OUT" || (event as string) === "TOKEN_REFRESH_FAILED") {
+          console.warn("Auth session ended, logging out");
+          await supabase.auth.signOut();
+        }
+
+        setSession(session);
+      }
+    );
+
+    
+
     return () => {
       mounted = false;
+      listener.subscription.unsubscribe();
+      if (timeoutId) clearTimeout(timeoutId);
     };
-  // Remove the eslint-disable comment to enforce the rule
-    }, []); // Empty array - only runs once
+  }, []); // Empty array - only runs once
 
   // auth listener - RUNS ONLY ONCE ON MOUNT
   useEffect(() => {

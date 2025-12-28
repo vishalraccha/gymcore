@@ -9,15 +9,19 @@ import {
   Modal,
   ActivityIndicator,
   Platform,
+  TouchableOpacity,
+  Alert,
 } from "react-native";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import { getUserPaymentHistory } from "@/lib/razorpay";
+import { getUserInvoices } from "@/lib/invoice";
 import { Card } from "@/components/ui/Card";
 import { useRouter } from "expo-router";
 import SafeAreaWrapper from "@/components/SafeAreaWrapper";
 import { useTheme } from '@/contexts/ThemeContext';
 import ThemePicker from '@/components/ThemePicker';
+import { formatRupees } from '@/lib/currency';
 import {
   User,
   Bell,
@@ -26,6 +30,7 @@ import {
   CircleHelp,
   Shield,
   FileText,
+  Download,
   LogOut,
   Crown,
   Trophy,
@@ -49,7 +54,9 @@ export default function ProfileScreen() {
   const [darkMode, setDarkMode] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [payments, setPayments] = useState<Array<{ id: string; plan: { name: string }; payment_date: string; amount: number; status: string }>>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
   const [loadingPayments, setLoadingPayments] = useState(false);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
 
   // Show loading indicator when payments are being loaded (rendered inside return)
 
@@ -66,6 +73,7 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (profile?.id) {
       loadPayments();
+      loadInvoices();
     }
   }, [profile]);
 
@@ -79,6 +87,18 @@ export default function ProfileScreen() {
     } finally {
       setLoadingPayments(false);
       console.log('Finished loading payments');
+    }
+  };
+
+  const loadInvoices = async () => {
+    try {
+      setLoadingInvoices(true);
+      const data = await getUserInvoices(profile!.id);
+      setInvoices(data);
+    } catch (error) {
+      console.error('Error loading invoices:', error);
+    } finally {
+      setLoadingInvoices(false);
     }
   };
 
@@ -357,6 +377,59 @@ export default function ProfileScreen() {
     },
     statusSuccess: { backgroundColor: theme.colors.success + '30' },
     statusText: { fontSize: 11, fontWeight: "600", color: theme.colors.success },
+    invoiceCard: {
+      marginBottom: 8,
+      padding: 16,
+    },
+    invoiceHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    invoiceIconContainer: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: theme.colors.primaryLight + '30',
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: 12,
+    },
+    invoiceInfo: {
+      flex: 1,
+    },
+    invoiceNumber: {
+      fontSize: 15,
+      fontWeight: "600",
+      color: theme.colors.text,
+    },
+    invoiceDate: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+    invoiceRight: {
+      alignItems: "flex-end",
+    },
+    invoiceAmount: {
+      fontSize: 16,
+      fontWeight: "bold",
+      color: theme.colors.text,
+      marginBottom: 4,
+    },
+    downloadButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 6,
+      backgroundColor: theme.colors.primaryLight + '30',
+    },
+    downloadText: {
+      fontSize: 12,
+      fontWeight: "600",
+      color: theme.colors.primary,
+    },
     statsGrid: {
       flexDirection: "row",
       flexWrap: "wrap",
@@ -681,7 +754,7 @@ export default function ProfileScreen() {
                         </Text>
                       </View>
                       <View style={styles.paymentRight}>
-                        <Text style={styles.paymentPrice}>₹{payment.amount}</Text>
+                        <Text style={styles.paymentPrice}>{formatRupees(payment.amount)}</Text>
                         <View style={[
                           styles.paymentStatus,
                           payment.status === 'success' && styles.statusSuccess
@@ -697,6 +770,49 @@ export default function ProfileScreen() {
               </View>
             )}
           </>
+        )}
+
+        {/* Invoices Section */}
+        {invoices.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Invoices</Text>
+              <Text style={styles.sectionCount}>{invoices.length}</Text>
+            </View>
+            {invoices.slice(0, 5).map((invoice) => (
+              <Card key={invoice.id} style={styles.invoiceCard}>
+                <View style={styles.invoiceHeader}>
+                  <View style={styles.invoiceIconContainer}>
+                    <FileText size={20} color={theme.colors.primary} />
+                  </View>
+                  <View style={styles.invoiceInfo}>
+                    <Text style={styles.invoiceNumber}>{invoice.invoice_number}</Text>
+                    <Text style={styles.invoiceDate}>
+                      {new Date(invoice.invoice_date).toLocaleDateString('en-IN', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })}
+                    </Text>
+                  </View>
+                  <View style={styles.invoiceRight}>
+                    <Text style={styles.invoiceAmount}>
+                      {formatRupees(invoice.total_amount)}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.downloadButton}
+                      onPress={() => {
+                        Alert.alert('Info', 'Invoice download feature coming soon');
+                      }}
+                    >
+                      <Download size={16} color={theme.colors.primary} />
+                      <Text style={styles.downloadText}>Download</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </Card>
+            ))}
+          </View>
         )}
 
         {/* Achievements */}

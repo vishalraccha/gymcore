@@ -1,21 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, Modal, TouchableOpacity, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, Modal, TouchableOpacity, Alert, Platform, RefreshControl } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { DietLog } from '@/types/database';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { ProgressBar } from '@/components/ui/ProgressBar';
-import { Plus, X, UtensilsCrossed, Target } from 'lucide-react-native';
+import { Plus, X, UtensilsCrossed, Target, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import SafeAreaWrapper from "@/components/SafeAreaWrapper";
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useCallback } from 'react';
+
 
 export default function DietScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const [dietLogs, setDietLogs] = useState<DietLog[]>([]);
+  const [dietPlans, setDietPlans] = useState<any[]>([]);
+  const [filteredDietPlans, setFilteredDietPlans] = useState<any[]>([]);
+  const [selectedDay, setSelectedDay] = useState<number>(() => {
+    const today = new Date().getDay();
+    return today === 0 ? 6 : today - 1;
+  });
   const [showAddMeal, setShowAddMeal] = useState(false);
   const [newMeal, setNewMeal] = useState({
     meal_name: '',
@@ -26,6 +34,7 @@ export default function DietScreen() {
     fat: '',
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const todayDate = new Date().toISOString().split('T')[0];
   const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 85 : 65;
@@ -47,7 +56,14 @@ export default function DietScreen() {
 
   useEffect(() => {
     fetchTodayDiet();
+    fetchDietPlans();
   }, []);
+
+  useEffect(() => {
+    if (dietPlans.length > 0) {
+      filterDietPlansByDay(dietPlans, selectedDay);
+    }
+  }, [selectedDay, dietPlans]);
 
   const fetchTodayDiet = async () => {
     if (!user) return;
@@ -66,6 +82,75 @@ export default function DietScreen() {
     } catch (error) {
       console.warn('Error fetching diet logs:', error);
     }
+  };
+
+  const fetchDietPlans = async () => {
+    if (!user) return;
+
+    try {
+      // Get user's profile with personal training flag
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('gym_id, has_personal_training')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.gym_id) return;
+
+      // ONLY show diet plans if user has personal training enabled
+      if (!profile.has_personal_training) {
+        setDietPlans([]);
+        setFilteredDietPlans([]);
+        return;
+      }
+
+      let allPlans: any[] = [];
+
+      // Fetch personal training diet plans
+      const { data: assignment } = await supabase
+        .from('personal_training_assignments')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single();
+
+      if (assignment) {
+        const { data: personalPlans, error: personalError } = await supabase
+          .from('diet_plans')
+          .select('*')
+          .eq('personal_training_id', assignment.id)
+          .eq('is_active', true)
+          .order('day_of_week', { ascending: true })
+          .order('meal_type', { ascending: true });
+
+        if (!personalError && personalPlans) {
+          allPlans = [...allPlans, ...personalPlans];
+        }
+      }
+
+      setDietPlans(allPlans);
+      filterDietPlansByDay(allPlans, selectedDay);
+    } catch (error) {
+      console.warn('Error fetching diet plans:', error);
+    }
+  };
+
+  const filterDietPlansByDay = useCallback((plansList: any[], day: number) => {
+    // Convert selectedDay to day_of_week format (0=Sunday, 1=Monday, etc.)
+    const dayOfWeek = day === 6 ? 0 : day + 1;
+    
+    const filtered = plansList.filter((plan) => {
+      // Show plans with matching day_of_week OR plans without day_of_week (general plans)
+      return plan.day_of_week === null || plan.day_of_week === dayOfWeek;
+    });
+    
+    setFilteredDietPlans(filtered);
+  }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([fetchTodayDiet(), fetchDietPlans()]);
+    setRefreshing(false);
   };
 
   const addMeal = async () => {
@@ -317,6 +402,116 @@ export default function DietScreen() {
       shadowRadius: 8,
       elevation: 8,
     },
+    daySelectorContainer: {
+      marginBottom: 16,
+      paddingHorizontal: 24,
+    },
+    daySelectorScroll: {
+      gap: 8,
+    },
+    dayButton: {
+      minWidth: 50,
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 8,
+    },
+    dayButtonSelected: {
+      backgroundColor: theme.colors.primary,
+      borderColor: theme.colors.primary,
+    },
+    dayButtonToday: {
+      borderColor: theme.colors.accent,
+      borderWidth: 2,
+    },
+    dayButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    dayButtonTextSelected: {
+      color: theme.colors.card,
+    },
+    dayButtonTextToday: {
+      color: theme.colors.accent,
+    },
+    todayIndicator: {
+      position: 'absolute',
+      top: 4,
+      right: 4,
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: theme.colors.accent,
+    },
+    dietPlansCard: {
+      marginHorizontal: 24,
+      marginBottom: 16,
+      padding: 20,
+    },
+    dietPlansHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 16,
+    },
+    dietPlansTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    planItem: {
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    planMealType: {
+      marginBottom: 8,
+    },
+    planMealTypeText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.primary,
+      textTransform: 'uppercase',
+    },
+    planInfo: {
+      flex: 1,
+    },
+    planName: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 4,
+    },
+    planDescription: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginBottom: 8,
+    },
+    planNutrition: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 8,
+    },
+    planNutritionText: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+    },
+    planInstructions: {
+      marginTop: 8,
+    },
+    planInstructionText: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      lineHeight: 18,
+      marginBottom: 4,
+    },
     modalContainer: {
       flex: 1,
       backgroundColor: theme.colors.card,
@@ -412,11 +607,114 @@ export default function DietScreen() {
       <ScrollView 
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: FAB_BOTTOM_OFFSET + 20 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.colors.primary}
+            colors={[theme.colors.primary]}
+          />
+        }
       >
         <View style={styles.header}>
           <Text style={styles.title}>Nutrition</Text>
           <Text style={styles.subtitle}>Track your daily nutrition goals</Text>
         </View>
+
+        {/* Day Selector */}
+        <View style={styles.daySelectorContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.daySelectorScroll}
+          >
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
+              const isSelected = selectedDay === index;
+              const isToday = (() => {
+                const today = new Date().getDay();
+                const todayIndex = today === 0 ? 6 : today - 1;
+                return todayIndex === index;
+              })();
+
+              return (
+                <TouchableOpacity
+                  key={index}
+                  style={[
+                    styles.dayButton,
+                    isSelected && styles.dayButtonSelected,
+                    isToday && !isSelected && styles.dayButtonToday,
+                  ]}
+                  onPress={() => setSelectedDay(index)}
+                >
+                  <Text
+                    style={[
+                      styles.dayButtonText,
+                      isSelected && styles.dayButtonTextSelected,
+                      isToday && !isSelected && styles.dayButtonTextToday,
+                    ]}
+                  >
+                    {day}
+                  </Text>
+                  {isToday && (
+                    <View style={styles.todayIndicator} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* Diet Plans Section */}
+        {filteredDietPlans.length > 0 && (
+          <Card style={styles.dietPlansCard}>
+            <View style={styles.dietPlansHeader}>
+              <UtensilsCrossed size={20} color={theme.colors.primary} />
+              <Text style={styles.dietPlansTitle}>Recommended Diet Plan</Text>
+            </View>
+            {filteredDietPlans
+              .sort((a, b) => {
+                const mealOrder = { breakfast: 1, lunch: 2, dinner: 3, snack: 4 };
+                return (mealOrder[a.meal_type as keyof typeof mealOrder] || 5) - 
+                       (mealOrder[b.meal_type as keyof typeof mealOrder] || 5);
+              })
+              .map((plan, index) => (
+                <View key={plan.id} style={styles.planItem}>
+                  <View style={styles.planMealType}>
+                    <Text style={styles.planMealTypeText}>
+                      {plan.meal_type?.charAt(0).toUpperCase() + plan.meal_type?.slice(1)}
+                    </Text>
+                  </View>
+                  <View style={styles.planInfo}>
+                    <Text style={styles.planName}>{plan.meal_name}</Text>
+                    {plan.description && (
+                      <Text style={styles.planDescription}>{plan.description}</Text>
+                    )}
+                    <View style={styles.planNutrition}>
+                      {plan.calories && (
+                        <Text style={styles.planNutritionText}>
+                          {plan.calories} cal
+                        </Text>
+                      )}
+                      {plan.protein && (
+                        <Text style={styles.planNutritionText}>
+                          • {plan.protein}g protein
+                        </Text>
+                      )}
+                    </View>
+                    {plan.instructions && plan.instructions.length > 0 && (
+                      <View style={styles.planInstructions}>
+                        {plan.instructions.map((instruction: string, idx: number) => (
+                          <Text key={idx} style={styles.planInstructionText}>
+                            • {instruction}
+                          </Text>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </View>
+              ))}
+          </Card>
+        )}
 
         {/* Nutrition Overview */}
         <Card style={styles.overviewCard}>

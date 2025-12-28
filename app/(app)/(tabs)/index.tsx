@@ -27,6 +27,10 @@ import {
 } from 'lucide-react-native';
 import SafeAreaWrapper from '../../../components/SafeAreaWrapper';
 import { useTheme } from '@/contexts/ThemeContext';
+import { getUserPendingPayments } from '@/lib/pendingPayments';
+import { formatRupees } from '@/lib/currency';
+import { AlertCircle } from 'lucide-react-native';
+import { router } from 'expo-router';
 
 export default function HomeScreen() {
   const { theme } = useTheme();
@@ -46,6 +50,7 @@ export default function HomeScreen() {
   }
   
   const [todayAttendance, setTodayAttendance] = useState<Attendance | null>(null);
+  const [pendingPayments, setPendingPayments] = useState<any[]>([]);
   const { stats, streak, refreshStats } = useStats(selectedDate);
 
   useEffect(() => {
@@ -53,9 +58,24 @@ export default function HomeScreen() {
       checkTodayAttendance();
       refreshProfile();
       refreshStats();
+      fetchPendingPayments();
       console.log('Homescreen of Tabs (index.tsx)');
     }
   }, [user, selectedDate]);
+
+  const fetchPendingPayments = async () => {
+    if (!user) return;
+    try {
+      const payments = await getUserPendingPayments(user.id);
+      // Filter to show only pending/partial/overdue payments
+      const activePayments = payments.filter(
+        (p: any) => p.status === 'pending' || p.status === 'partial' || p.status === 'overdue'
+      );
+      setPendingPayments(activePayments);
+    } catch (error) {
+      console.error('Error fetching pending payments:', error);
+    }
+  };
 
    useEffect(() => {
     const debugCheck = async () => {
@@ -379,6 +399,59 @@ export default function HomeScreen() {
     calendar: {
       borderRadius: 12,
     },
+    pendingPaymentBanner: {
+      marginHorizontal: 16,
+      marginBottom: 16,
+      padding: 16,
+      borderLeftWidth: 4,
+      borderLeftColor: theme.colors.error,
+      backgroundColor: theme.colors.error + '10',
+    },
+    pendingPaymentHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 12,
+    },
+    pendingPaymentTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.error,
+    },
+    pendingPaymentItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 8,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+      marginTop: 8,
+      paddingTop: 8,
+    },
+    pendingPaymentInfo: {
+      flex: 1,
+      marginRight: 12,
+    },
+    pendingPaymentLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 4,
+    },
+    pendingPaymentAmount: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.error,
+      marginBottom: 4,
+    },
+    overdueText: {
+      fontSize: 12,
+      color: theme.colors.error,
+      fontWeight: '600',
+    },
+    payNowButton: {
+      minWidth: 100,
+    },
   });
 
   return (
@@ -404,6 +477,37 @@ export default function HomeScreen() {
           </View>
         </View>
       </View>
+
+      {/* Pending Payments Banner */}
+      {pendingPayments.length > 0 && (
+        <Card style={styles.pendingPaymentBanner}>
+          <View style={styles.pendingPaymentHeader}>
+            <AlertCircle size={20} color={theme.colors.error} />
+            <Text style={styles.pendingPaymentTitle}>Pending Payments</Text>
+          </View>
+          {pendingPayments.map((payment: any) => (
+            <View key={payment.id} style={styles.pendingPaymentItem}>
+              <View style={styles.pendingPaymentInfo}>
+                <Text style={styles.pendingPaymentLabel}>
+                  {payment.subscriptions?.name || 'Subscription Payment'}
+                </Text>
+                <Text style={styles.pendingPaymentAmount}>
+                  Pending: {formatRupees(payment.pending_amount)}
+                </Text>
+                {payment.status === 'overdue' && (
+                  <Text style={styles.overdueText}>⚠️ Overdue</Text>
+                )}
+              </View>
+              <Button
+                title="Pay Now"
+                onPress={() => router.push('/(app)/(tabs)/plans')}
+                variant="primary"
+                style={styles.payNowButton}
+              />
+            </View>
+          ))}
+        </Card>
+      )}
 
       {/* Check-in/out Section */}
       <Card style={styles.checkInCard}>

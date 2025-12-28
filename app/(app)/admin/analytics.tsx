@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { formatRupees } from '@/lib/currency';
 import { supabase } from '@/lib/supabase';
 import { Card } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
@@ -20,7 +21,6 @@ import {
   TrendingUp,
   Users,
   Dumbbell,
-  DollarSign,
   Activity,
   Clock,
   Calendar,
@@ -129,13 +129,17 @@ export default function AnalyticsScreen() {
         console.error('Error fetching members:', membersError);
       }
 
-      // Fetch user subscriptions for revenue calculation
-      let subscriptionsQuery = supabase.from('user_subscriptions').select(`
+      // Fetch user subscriptions for revenue calculation - use subscriptions table
+      let subscriptionsQuery = supabase
+        .from('user_subscriptions')
+        .select(`
           amount_paid,
           payment_status,
           payment_date,
           is_active,
           start_date,
+          end_date,
+          user_id,
           profiles!inner(gym_id)
         `);
 
@@ -148,11 +152,26 @@ export default function AnalyticsScreen() {
         console.error('Error fetching subscriptions:', subsError);
       }
 
-      // Calculate revenue
+      // Also fetch cash payments for revenue
+      let cashPaymentsQuery = supabase
+        .from('cash_payments')
+        .select('amount, payment_date, gym_id');
+
+      if (isGymOwner && gymId) {
+        cashPaymentsQuery = cashPaymentsQuery.eq('gym_id', gymId);
+      }
+
+      const { data: cashPayments, error: cashError } = await cashPaymentsQuery;
+      if (cashError) {
+        console.error('Error fetching cash payments:', cashError);
+      }
+
+      // Calculate revenue from subscriptions and cash payments
       const currentMonth = new Date().getMonth();
       const currentYear = new Date().getFullYear();
 
-      const monthlyRevenue = (userSubscriptions || [])
+      // Revenue from subscriptions
+      const subscriptionMonthlyRevenue = (userSubscriptions || [])
         .filter((sub) => {
           if (!sub || sub.payment_status !== 'paid' || !sub.payment_date) return false;
           const paymentDate = new Date(sub.payment_date);
@@ -163,12 +182,40 @@ export default function AnalyticsScreen() {
         })
         .reduce((sum, sub) => sum + ensureValidNumber(sub.amount_paid, 0), 0);
 
-      const totalRevenue = (userSubscriptions || [])
+      // Revenue from cash payments
+      const cashMonthlyRevenue = (cashPayments || [])
+        .filter((payment) => {
+          if (!payment || !payment.payment_date) return false;
+          const paymentDate = new Date(payment.payment_date);
+          return (
+            paymentDate.getMonth() === currentMonth &&
+            paymentDate.getFullYear() === currentYear
+          );
+        })
+        .reduce((sum, payment) => sum + ensureValidNumber(payment.amount, 0), 0);
+
+      const monthlyRevenue = subscriptionMonthlyRevenue + cashMonthlyRevenue;
+
+      const subscriptionTotalRevenue = (userSubscriptions || [])
         .filter((sub) => sub && sub.payment_status === 'paid')
         .reduce((sum, sub) => sum + ensureValidNumber(sub.amount_paid, 0), 0);
 
+      const cashTotalRevenue = (cashPayments || [])
+        .reduce((sum, payment) => sum + ensureValidNumber(payment.amount, 0), 0);
+
+      const totalRevenue = subscriptionTotalRevenue + cashTotalRevenue;
+
+      // Count active subscriptions (check both is_active and end_date)
+      const today = new Date().toISOString().split('T')[0];
       const activeSubscriptions = (userSubscriptions || []).filter(
-        (sub) => sub && sub.is_active === true
+        (sub) => {
+          if (!sub || !sub.is_active) return false;
+          // Also check if subscription hasn't expired
+          if (sub.end_date) {
+            return sub.end_date >= today;
+          }
+          return true;
+        }
       ).length;
 
       // Fetch workout logs
@@ -597,13 +644,13 @@ export default function AnalyticsScreen() {
         <View style={styles.statsGrid}>
           <StatCard
             title="Monthly Revenue"
-            value={`$${Math.round(analytics.monthlyRevenue).toLocaleString()}`}
-            icon={<DollarSign size={24} color={theme.colors.success} />}
+            value={formatRupees(Math.round(analytics.monthlyRevenue))}
+            icon={<Target size={24} color={theme.colors.success} />}
             color={theme.colors.success}
           />
           <StatCard
             title="Total Revenue"
-            value={`$${Math.round(analytics.totalRevenue).toLocaleString()}`}
+            value={formatRupees(Math.round(analytics.totalRevenue))}
             icon={<Target size={24} color={theme.colors.accent} />}
             color={theme.colors.accent}
           />
@@ -662,7 +709,7 @@ export default function AnalyticsScreen() {
       <Card style={styles.chartCard}>
         <Text style={styles.chartTitle}>Monthly Revenue</Text>
         <Text style={styles.chartSubtitle}>
-          Revenue from paid subscriptions (USD)
+          Revenue from paid subscriptions (₹)
         </Text>
         <BarChart
           data={chartData.revenue}

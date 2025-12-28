@@ -118,11 +118,11 @@ serve(async (req) => {
 
     console.log('✅ Request validated');
 
-    // Fetch plan from database
-    console.log('🔵 Fetching plan from database...');
+    // Fetch plan from database (using subscriptions table)
+    console.log('🔵 Fetching subscription plan from database...');
     const { data: plan, error: planError } = await supabaseClient
-      .from('plans')
-      .select('*')
+      .from('subscriptions')
+      .select('*, gyms(id, name)')
       .eq('id', planId)
       .eq('is_active', true)
       .single();
@@ -140,7 +140,24 @@ serve(async (req) => {
       id: plan.id,
       name: plan.name,
       price: plan.price,
+      gym_id: plan.gym_id,
     });
+
+    // Get gym owner's payment account if plan belongs to a gym
+    let gymPaymentAccount = null;
+    if (plan.gym_id) {
+      const { data: paymentAccount } = await supabaseClient
+        .from('gym_payment_accounts')
+        .select('*')
+        .eq('gym_id', plan.gym_id)
+        .eq('is_active', true)
+        .single();
+
+      if (paymentAccount) {
+        gymPaymentAccount = paymentAccount;
+        console.log('✅ Gym payment account found:', paymentAccount.payment_gateway);
+      }
+    }
 
     // Verify amount
     const expectedAmount = Math.round(plan.price * 100);
@@ -160,7 +177,20 @@ serve(async (req) => {
 
     // Create Razorpay order
     console.log('🔵 Creating Razorpay order...');
-    const auth = btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`);
+    
+    // Use gym owner's Razorpay credentials if available, otherwise use platform credentials
+    let razorpayKeyId = RAZORPAY_KEY_ID;
+    let razorpayKeySecret = RAZORPAY_KEY_SECRET;
+    
+    if (gymPaymentAccount && gymPaymentAccount.payment_gateway === 'razorpay') {
+      if (gymPaymentAccount.razorpay_key_id && gymPaymentAccount.razorpay_key_secret) {
+        razorpayKeyId = gymPaymentAccount.razorpay_key_id;
+        razorpayKeySecret = gymPaymentAccount.razorpay_key_secret;
+        console.log('✅ Using gym owner Razorpay account');
+      }
+    }
+    
+    const auth = btoa(`${razorpayKeyId}:${razorpayKeySecret}`);
     
     // Generate short receipt (max 40 chars)
     const timestamp = Date.now().toString().slice(-8); // Last 8 digits
@@ -169,7 +199,7 @@ serve(async (req) => {
     
     console.log('📝 Receipt generated:', receipt, `(${receipt.length} chars)`);
     
-    const razorpayPayload = {
+    const razorpayPayload: any = {
       amount: amount,
       currency: currency,
       receipt: receipt,
@@ -177,8 +207,26 @@ serve(async (req) => {
         user_id: user.id,
         plan_id: planId,
         plan_name: plan.name,
+        gym_id: plan.gym_id || null,
       },
     };
+
+    // If gym has Razorpay account ID, use transfers to route payment
+    if (gymPaymentAccount && gymPaymentAccount.razorpay_account_id) {
+      razorpayPayload.transfers = [
+        {
+          account: gymPaymentAccount.razorpay_account_id,
+          amount: amount, // Full amount goes to gym owner
+          currency: currency,
+          notes: {
+            gym_id: plan.gym_id,
+            plan_id: planId,
+            user_id: user.id,
+          },
+        },
+      ];
+      console.log('✅ Payment will be routed to gym owner account');
+    }
 
     console.log('📦 Razorpay payload:', razorpayPayload);
 

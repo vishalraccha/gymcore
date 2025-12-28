@@ -30,9 +30,15 @@ import {
   UtensilsCrossed,
   Flame,
   Clock,
+  CreditCard,
+  DollarSign,
 } from 'lucide-react-native';
+import { createSubscriptionWithCashPayment } from '@/lib/cashPayment';
+import { createSubscriptionInvoice } from '@/lib/invoice';
+import { formatRupees } from '@/lib/currency';
 
 interface MemberDetails extends Profile {
+  has_personal_training?: boolean;
   workout_logs?: WorkoutLog[];
   diet_logs?: DietLog[];
   attendance?: Attendance[];
@@ -62,15 +68,42 @@ export default function MembersScreen() {
     email: '',
     phone: '',
     password: '',
+    has_personal_training: false,
   });
+  const [availableSubscriptions, setAvailableSubscriptions] = useState<any[]>([]);
+  const [selectedSubscription, setSelectedSubscription] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online' | 'none'>('none');
+  const [cashAmount, setCashAmount] = useState('');
+  const [receiptNumber, setReceiptNumber] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (profile?.role === 'admin' || profile?.role === 'gym_owner') {
       fetchMembers();
+      fetchAvailableSubscriptions();
     }
   }, [profile]);
+
+  const fetchAvailableSubscriptions = async () => {
+    try {
+      let query = supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('is_active', true)
+        .order('duration_months', { ascending: true });
+
+      if (profile?.role === 'gym_owner' && profile.gym_id) {
+        query = query.eq('gym_id', profile.gym_id);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      setAvailableSubscriptions(data || []);
+    } catch (error) {
+      console.error('Error fetching subscriptions:', error);
+    }
+  };
 
   // Filter members when search query or members change
   useEffect(() => {
@@ -231,6 +264,20 @@ export default function MembersScreen() {
       return;
     }
 
+    // Validate subscription selection if payment method is selected
+    if (paymentMethod !== 'none' && !selectedSubscription) {
+      Alert.alert('Error', 'Please select a subscription plan');
+      return;
+    }
+
+    // Validate cash payment details
+    if (paymentMethod === 'cash') {
+      if (!cashAmount || parseFloat(cashAmount) <= 0) {
+        Alert.alert('Error', 'Please enter a valid payment amount');
+        return;
+      }
+    }
+
     setIsLoading(true);
 
     try {
@@ -243,11 +290,11 @@ export default function MembersScreen() {
             full_name: newMember.full_name,
             phone: newMember.phone || null,
             role: 'member',
-            gym_id: profile?.gym_id ? String(profile.gym_id) : null, // FIXED
+            gym_id: profile?.gym_id ? String(profile.gym_id) : null,
+            has_personal_training: newMember.has_personal_training,
           },
         },
       });
-
 
       if (authError) throw authError;
 
@@ -258,18 +305,115 @@ export default function MembersScreen() {
       // Wait a moment for the trigger to create the profile
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
+      const userId = authData.user.id;
+      let subscriptionCreated = false;
+
+      // Update profile with personal training flag if needed
+      if (newMember.has_personal_training) {
+        await supabase
+          .from('profiles')
+          .update({ has_personal_training: true })
+          .eq('id', userId);
+
+        // Create personal training assignment
+        if (profile?.gym_id) {
+          await supabase.from('personal_training_assignments').insert([
+            {
+              user_id: userId,
+              gym_id: profile.gym_id,
+              assigned_by: profile.id,
+              is_active: true,
+              start_date: new Date().toISOString().split('T')[0],
+            },
+          ]);
+        }
+      }
+
+      // Create subscription if selected
+      if (paymentMethod !== 'none' && selectedSubscription) {
+        try {
+          if (paymentMethod === 'cash') {
+            // Create subscription with cash payment
+            const amount = parseFloat(cashAmount);
+            const { paymentId, subscriptionId } = await createSubscriptionWithCashPayment(
+              userId,
+              selectedSubscription,
+              amount,
+              profile?.gym_id,
+              profile?.id,
+              receiptNumber || undefined
+            );
+
+            // Create invoice
+            await createSubscriptionInvoice(
+              userId,
+              selectedSubscription,
+              amount,
+              'cash',
+              paymentId,
+              profile?.gym_id
+            );
+
+            subscriptionCreated = true;
+          } else if (paymentMethod === 'online') {
+            // For online payments, create subscription but mark as pending
+            // Member will complete payment through the app
+            const { data: subscription } = await supabase
+              .from('subscriptions')
+              .select('duration_days')
+              .eq('id', selectedSubscription)
+              .single();
+
+            if (subscription) {
+              const startDate = new Date();
+              const endDate = new Date();
+              endDate.setDate(endDate.getDate() + subscription.duration_days);
+
+              await supabase.from('user_subscriptions').insert([
+                {
+                  user_id: userId,
+                  subscription_id: selectedSubscription,
+                  start_date: startDate.toISOString().split('T')[0],
+                  end_date: endDate.toISOString().split('T')[0],
+                  amount_paid: 0,
+                  payment_status: 'pending',
+                  payment_method: 'online',
+                  is_active: false,
+                  currency: 'INR',
+                },
+              ]);
+            }
+          }
+        } catch (subError) {
+          console.error('Error creating subscription:', subError);
+          // Don't fail member creation if subscription fails
+          Alert.alert(
+            'Warning',
+            'Member created but subscription setup failed. You can add subscription later.'
+          );
+        }
+      }
+
+      // Reset form
       setNewMember({
         full_name: '',
         email: '',
         phone: '',
         password: '',
+        has_personal_training: false,
       });
+      setSelectedSubscription('');
+      setPaymentMethod('none');
+      setCashAmount('');
+      setReceiptNumber('');
       setShowAddMember(false);
       await fetchMembers();
-      Alert.alert(
-        'Success',
-        `Member ${newMember.full_name} added successfully! They can now login with their email and password.`
-      );
+
+      const successMessage = subscriptionCreated
+        ? `Member ${newMember.full_name} added successfully with active subscription! Login credentials sent to email.`
+        : `Member ${newMember.full_name} added successfully! They can now login with their email and password.`;
+
+      Alert.alert('Success', successMessage);
     } catch (error) {
       console.error('Error adding member:', error);
 
@@ -695,6 +839,126 @@ export default function MembersScreen() {
     deleteButtonText: {
       color: theme.colors.error,
     },
+    sectionDivider: {
+      height: 1,
+      backgroundColor: theme.colors.border,
+      marginVertical: 24,
+    },
+    sectionTitleText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 8,
+    },
+    subscriptionScroll: {
+      marginBottom: 20,
+    },
+    subscriptionOption: {
+      minWidth: 140,
+      padding: 16,
+      marginRight: 12,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.background,
+    },
+    subscriptionOptionSelected: {
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.colors.primaryLight + '20',
+    },
+    subscriptionOptionName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 4,
+    },
+    subscriptionOptionNameSelected: {
+      color: theme.colors.primary,
+    },
+    subscriptionOptionPrice: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 2,
+    },
+    subscriptionOptionPriceSelected: {
+      color: theme.colors.primary,
+    },
+    subscriptionOptionDuration: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+    },
+    subscriptionOptionDurationSelected: {
+      color: theme.colors.primary,
+    },
+    paymentMethodRow: {
+      flexDirection: 'row',
+      gap: 12,
+      marginBottom: 20,
+    },
+    paymentMethodOption: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.background,
+      gap: 8,
+    },
+    paymentMethodOptionSelected: {
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.colors.primary,
+    },
+    paymentMethodText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    paymentMethodTextSelected: {
+      color: theme.colors.card,
+    },
+    toggleContainer: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.background,
+    },
+    toggleLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    toggleSwitch: {
+      width: 50,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: theme.colors.border,
+      justifyContent: 'center',
+      paddingHorizontal: 2,
+    },
+    toggleSwitchActive: {
+      backgroundColor: theme.colors.primary,
+    },
+    toggleThumb: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: theme.colors.card,
+      alignSelf: 'flex-start',
+    },
+    toggleThumbActive: {
+      alignSelf: 'flex-end',
+    },
   });
 
   return (
@@ -887,6 +1151,180 @@ export default function MembersScreen() {
               The member will use this email and password to login to the app.
             </Text>
 
+            {/* Subscription Selection */}
+            <View style={styles.sectionDivider} />
+            <Text style={styles.sectionTitleText}>Subscription (Optional)</Text>
+            <Text style={styles.helperText}>
+              You can add a subscription now or later. If adding now, select payment method.
+            </Text>
+
+            {availableSubscriptions.length > 0 ? (
+              <>
+                <Text style={styles.inputLabel}>Select Plan</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.subscriptionScroll}
+                >
+                  {availableSubscriptions.map((sub) => (
+                    <TouchableOpacity
+                      key={sub.id}
+                      style={[
+                        styles.subscriptionOption,
+                        selectedSubscription === sub.id && styles.subscriptionOptionSelected,
+                      ]}
+                      onPress={() => {
+                        setSelectedSubscription(sub.id);
+                        if (paymentMethod === 'none') {
+                          setPaymentMethod('cash');
+                        }
+                        setCashAmount(sub.price.toString());
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.subscriptionOptionName,
+                          selectedSubscription === sub.id &&
+                            styles.subscriptionOptionNameSelected,
+                        ]}
+                      >
+                        {sub.name}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.subscriptionOptionPrice,
+                          selectedSubscription === sub.id &&
+                            styles.subscriptionOptionPriceSelected,
+                        ]}
+                      >
+                        {formatRupees(sub.price)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.subscriptionOptionDuration,
+                          selectedSubscription === sub.id &&
+                            styles.subscriptionOptionDurationSelected,
+                        ]}
+                      >
+                        {sub.duration_months} month{sub.duration_months > 1 ? 's' : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                {selectedSubscription && (
+                  <>
+                    <Text style={styles.inputLabel}>Payment Method</Text>
+                    <View style={styles.paymentMethodRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.paymentMethodOption,
+                          paymentMethod === 'cash' && styles.paymentMethodOptionSelected,
+                        ]}
+                        onPress={() => setPaymentMethod('cash')}
+                      >
+                        <DollarSign
+                          size={20}
+                          color={
+                            paymentMethod === 'cash'
+                              ? theme.colors.card
+                              : theme.colors.textSecondary
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.paymentMethodText,
+                            paymentMethod === 'cash' && styles.paymentMethodTextSelected,
+                          ]}
+                        >
+                          Cash
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.paymentMethodOption,
+                          paymentMethod === 'online' && styles.paymentMethodOptionSelected,
+                        ]}
+                        onPress={() => setPaymentMethod('online')}
+                      >
+                        <CreditCard
+                          size={20}
+                          color={
+                            paymentMethod === 'online'
+                              ? theme.colors.card
+                              : theme.colors.textSecondary
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.paymentMethodText,
+                            paymentMethod === 'online' && styles.paymentMethodTextSelected,
+                          ]}
+                        >
+                          Online
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.paymentMethodOption,
+                          paymentMethod === 'none' && styles.paymentMethodOptionSelected,
+                        ]}
+                        onPress={() => {
+                          setPaymentMethod('none');
+                          setSelectedSubscription('');
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.paymentMethodText,
+                            paymentMethod === 'none' && styles.paymentMethodTextSelected,
+                          ]}
+                        >
+                          Skip
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {paymentMethod === 'cash' && (
+                      <>
+                        <Text style={styles.inputLabel}>Amount Received (₹) *</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Enter amount"
+                          value={cashAmount}
+                          onChangeText={setCashAmount}
+                          keyboardType="decimal-pad"
+                          placeholderTextColor="#9CA3AF"
+                        />
+
+                        <Text style={styles.inputLabel}>Receipt Number (Optional)</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Enter receipt number"
+                          value={receiptNumber}
+                          onChangeText={setReceiptNumber}
+                          placeholderTextColor="#9CA3AF"
+                        />
+                        <Text style={styles.helperText}>
+                          Leave blank to auto-generate receipt number
+                        </Text>
+                      </>
+                    )}
+
+                    {paymentMethod === 'online' && (
+                      <Text style={styles.helperText}>
+                        Member will complete payment through the app after registration.
+                      </Text>
+                    )}
+                  </>
+                )}
+              </>
+            ) : (
+              <Text style={styles.helperText}>
+                No subscription plans available. Create plans in Subscriptions section.
+              </Text>
+            )}
+
             <Button
               title="Add Member"
               onPress={addMember}
@@ -949,6 +1387,79 @@ export default function MembersScreen() {
                       </View>
                     </View>
                   </View>
+                </Card>
+
+                {/* Personal Training Toggle */}
+                <Card style={styles.overviewCard}>
+                  <View style={styles.toggleContainer}>
+                    <Text style={styles.toggleLabel}>Personal Training</Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.toggleSwitch,
+                        selectedMember.has_personal_training && styles.toggleSwitchActive,
+                      ]}
+                      onPress={async () => {
+                        try {
+                          const newValue = !selectedMember.has_personal_training;
+                          const { error } = await supabase
+                            .from('profiles')
+                            .update({ has_personal_training: newValue })
+                            .eq('id', selectedMember.id);
+
+                          if (error) throw error;
+
+                          // Update personal training assignment
+                          if (newValue) {
+                            // Create assignment if doesn't exist
+                            const { data: existing } = await supabase
+                              .from('personal_training_assignments')
+                              .select('id')
+                              .eq('user_id', selectedMember.id)
+                              .single();
+
+                            if (!existing && profile?.gym_id) {
+                              await supabase.from('personal_training_assignments').insert([
+                                {
+                                  user_id: selectedMember.id,
+                                  gym_id: profile.gym_id,
+                                  assigned_by: profile.id,
+                                  is_active: true,
+                                  start_date: new Date().toISOString().split('T')[0],
+                                },
+                              ]);
+                            }
+                          } else {
+                            // Deactivate assignment
+                            await supabase
+                              .from('personal_training_assignments')
+                              .update({ is_active: false })
+                              .eq('user_id', selectedMember.id);
+                          }
+
+                          setSelectedMember({
+                            ...selectedMember,
+                            has_personal_training: newValue,
+                          });
+                          Alert.alert('Success', `Personal training ${newValue ? 'enabled' : 'disabled'}`);
+                        } catch (error) {
+                          console.error('Error updating personal training:', error);
+                          Alert.alert('Error', 'Failed to update personal training status');
+                        }
+                      }}
+                    >
+                      <View
+                        style={[
+                          styles.toggleThumb,
+                          selectedMember.has_personal_training && styles.toggleThumbActive,
+                        ]}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.helperText}>
+                    {selectedMember.has_personal_training
+                      ? 'Member has access to personal training diet plans'
+                      : 'Enable to provide custom diet plans for this member'}
+                  </Text>
                 </Card>
 
                 {/* Stats Cards */}

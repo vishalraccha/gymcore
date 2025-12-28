@@ -453,6 +453,35 @@ export default function WorkoutsManagementScreen() {
       marginTop: 16,
       marginBottom: 40,
     },
+    daySelectorRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 12,
+    },
+    dayOption: {
+      minWidth: 60,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    dayOptionSelected: {
+      backgroundColor: theme.colors.primary,
+      borderColor: theme.colors.primary,
+    },
+    dayOptionText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    dayOptionTextSelected: {
+      color: theme.colors.card,
+    },
   });
 
   if (isLoading && !refreshing) {
@@ -654,14 +683,47 @@ export default function WorkoutsManagementScreen() {
               ))}
             </View>
 
-            <TextInput
-              style={styles.input}
-              placeholder="Day of Week (0=Sunday, 6=Saturday, leave empty for any day)"
-              placeholderTextColor={theme.colors.textSecondary}
-              value={newWorkout.day_of_week}
-              onChangeText={(text) => setNewWorkout({ ...newWorkout, day_of_week: text })}
-              keyboardType="numeric"
-            />
+            <Text style={styles.inputLabel}>Day of Week</Text>
+            <View style={styles.daySelectorRow}>
+              <TouchableOpacity
+                style={[
+                  styles.dayOption,
+                  newWorkout.day_of_week === '' && styles.dayOptionSelected,
+                ]}
+                onPress={() => setNewWorkout({ ...newWorkout, day_of_week: '' })}
+              >
+                <Text
+                  style={[
+                    styles.dayOptionText,
+                    newWorkout.day_of_week === '' && styles.dayOptionTextSelected,
+                  ]}
+                >
+                  Any Day
+                </Text>
+              </TouchableOpacity>
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={[
+                    styles.dayOption,
+                    newWorkout.day_of_week === index.toString() && styles.dayOptionSelected,
+                  ]}
+                  onPress={() => setNewWorkout({ ...newWorkout, day_of_week: index.toString() })}
+                >
+                  <Text
+                    style={[
+                      styles.dayOptionText,
+                      newWorkout.day_of_week === index.toString() && styles.dayOptionTextSelected,
+                    ]}
+                  >
+                    {day}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.helperText}>
+              Select a specific day or leave as "Any Day" for general workouts
+            </Text>
 
             <TextInput
               style={[styles.input, styles.textArea]}

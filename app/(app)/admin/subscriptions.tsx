@@ -10,8 +10,9 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import SafeAreaWrapper from '@/components/SafeAreaWrapper';
 import { 
-  Plus, Edit, Trash2, X, CreditCard, DollarSign, Calendar, Users 
+  Plus, Edit, Trash2, X, CreditCard, Calendar, Users 
 } from 'lucide-react-native';
+import { formatRupees } from '@/lib/currency';
 
 interface Subscription {
   id: string;
@@ -133,7 +134,7 @@ export default function SubscriptionsScreen() {
         duration_months: durationMonths,
         duration_days: durationDays,
         price: parseFloat(newSubscription.price),
-        currency: 'USD',
+        currency: 'INR',
         features: newSubscription.features 
           ? newSubscription.features.split('\n').filter(f => f.trim()).map(f => f.trim())
           : [],
@@ -491,9 +492,8 @@ export default function SubscriptionsScreen() {
               <View style={styles.subscriptionInfo}>
                 <Text style={styles.subscriptionName}>{subscription.name}</Text>
                 <View style={styles.priceRow}>
-                  <DollarSign size={20} color={theme.colors.success} />
                   <Text style={styles.subscriptionPrice}>
-                    ${subscription.price}
+                    {formatRupees(subscription.price)}
                   </Text>
                   <Text style={styles.subscriptionDuration}>
                     /{subscription.duration_months === 1 ? 'month' : `${subscription.duration_months} months`}
@@ -623,7 +623,7 @@ export default function SubscriptionsScreen() {
                 />
               </View>
               <View style={styles.inputHalf}>
-                <Text style={styles.inputLabel}>Price (USD) *</Text>
+                <Text style={styles.inputLabel}>Price (₹) *</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="e.g., 49.99"

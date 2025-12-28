@@ -5,7 +5,8 @@ import { Tabs, router } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Settings, Users, BarChart2, FileText, Home } from "lucide-react-native";
+import { Settings, Users, BarChart2, FileText, Home, UserCheck } from "lucide-react-native";
+
 
 export default function AdminTabsLayout() {
   const { profile, isLoading } = useAuth();
@@ -73,6 +74,10 @@ export default function AdminTabsLayout() {
       <Tabs.Screen
         name="analytics"
         options={{ title: "Analytics", tabBarIcon: ({ size, color }) => <BarChart2 size={size} color={color} /> }}
+      />
+      <Tabs.Screen
+        name="personal-training"
+        options={{ title: "Personal Training", tabBarIcon: ({ size, color }) => <UserCheck size={size} color={color} /> }}
       />
     </Tabs>
   );

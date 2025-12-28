@@ -86,17 +86,35 @@ export default function AdminDashboardScreen() {
 
       const { count: totalMembers } = await membersQuery;
 
-      // Fetch active subscriptions
+      // Fetch active subscriptions - check both is_active AND end_date
+      const now = new Date().toISOString();
       let activeSubsQuery = supabase
         .from('user_subscriptions')
-        .select('user_id, subscriptions!inner(gym_id)', { count: 'exact', head: true })
-        .eq('is_active', true);
+        .select('user_id, subscriptions!inner(gym_id), end_date', { count: 'exact' });
 
       if (isGymOwner && gymId) {
         activeSubsQuery = activeSubsQuery.eq('subscriptions.gym_id', gymId);
       }
 
-      const { count: activeMembers } = await activeSubsQuery;
+      const { data: allSubscriptions, count: totalSubsCount } = await activeSubsQuery;
+
+      // Filter to get truly active subscriptions (is_active = true AND end_date > now)
+      const activeSubscriptions = (allSubscriptions || []).filter((sub: any) => {
+        const isActive = sub.is_active === true;
+        const notExpired = sub.end_date && new Date(sub.end_date) > new Date(now);
+        return isActive && notExpired;
+      });
+
+      const activeMembers = activeSubscriptions.length;
+
+      // Calculate expired members
+      const expiredSubscriptions = (allSubscriptions || []).filter((sub: any) => {
+        const isInactive = sub.is_active === false;
+        const isExpired = sub.end_date && new Date(sub.end_date) <= new Date(now);
+        return isInactive || isExpired;
+      });
+
+      const expiredMembers = expiredSubscriptions.length;
 
       // Fetch gym workouts
       let workoutsQuery = supabase
@@ -161,7 +179,7 @@ export default function AdminDashboardScreen() {
       setStats({
         totalMembers: totalMembers || 0,
         activeMembers: activeMembers || 0,
-        expiredMembers: (totalMembers || 0) - (activeMembers || 0),
+        expiredMembers: expiredMembers || 0,
         totalWorkouts: totalWorkouts || 0,
         totalSubscriptions: totalSubscriptions || 0,
         totalWorkoutLogs: totalWorkoutLogs || 0,
