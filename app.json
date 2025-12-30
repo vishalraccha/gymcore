@@ -16,18 +16,18 @@
     },
 
     "android": {
+      
       "jsEngine": "hermes",
       "package": "com.vishu2407.boltexponativewind",
-       "enableProguardInReleaseBuilds": true,
-      "enableShrinkResourcesInReleaseBuilds": true,
-      "enableDangerousExperimentalLeanBuilds": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#ffffff"
       },
       "permissions": [
         "INTERNET",
-        "ACCESS_NETWORK_STATE"
+        "ACCESS_NETWORK_STATE",
+        "WRITE_EXTERNAL_STORAGE", 
+        "READ_EXTERNAL_STORAGE"
       ],
       "intentFilters": [
         {

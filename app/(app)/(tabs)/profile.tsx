@@ -43,6 +43,7 @@ import {
   CheckCircle,
   Building2,
 } from "lucide-react-native";
+import InvoicesList from "@/components/InvoicesList";
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -772,48 +773,7 @@ export default function ProfileScreen() {
           </>
         )}
 
-        {/* Invoices Section */}
-        {invoices.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Invoices</Text>
-              <Text style={styles.sectionCount}>{invoices.length}</Text>
-            </View>
-            {invoices.slice(0, 5).map((invoice) => (
-              <Card key={invoice.id} style={styles.invoiceCard}>
-                <View style={styles.invoiceHeader}>
-                  <View style={styles.invoiceIconContainer}>
-                    <FileText size={20} color={theme.colors.primary} />
-                  </View>
-                  <View style={styles.invoiceInfo}>
-                    <Text style={styles.invoiceNumber}>{invoice.invoice_number}</Text>
-                    <Text style={styles.invoiceDate}>
-                      {new Date(invoice.invoice_date).toLocaleDateString('en-IN', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric'
-                      })}
-                    </Text>
-                  </View>
-                  <View style={styles.invoiceRight}>
-                    <Text style={styles.invoiceAmount}>
-                      {formatRupees(invoice.total_amount)}
-                    </Text>
-                    <TouchableOpacity
-                      style={styles.downloadButton}
-                      onPress={() => {
-                        Alert.alert('Info', 'Invoice download feature coming soon');
-                      }}
-                    >
-                      <Download size={16} color={theme.colors.primary} />
-                      <Text style={styles.downloadText}>Download</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </Card>
-            ))}
-          </View>
-        )}
+        <InvoicesList userId={profile!.id} onRefresh={loadInvoices} />
 
         {/* Achievements */}
         <View style={styles.section}>

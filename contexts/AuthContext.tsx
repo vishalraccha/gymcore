@@ -29,7 +29,7 @@ interface AuthContextType {
   profile: Profile | null;
   gym: Gym | null;
   isLoading: boolean;
-  signIn: (email: string, password: string, role?: string) => Promise<{ error: Error | null }>;  // Add role parameter
+  signIn: (email: string, password: string, role?: string) => Promise<{ error: Error | null }>;
   signUp: (
     email: string,
     password: string,
@@ -109,156 +109,154 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const refreshGym = async () => {
-    if (profile?.gym_id) await fetchGym(profile.gym_id);
+    if (profile?.gym_id) {
+      await fetchGym(profile.gym_id);
+    }
   };
 
-  // initial session load - RUNS ONLY ONCE ON MOUNT
+  // Single unified auth initialization and listener
   useEffect(() => {
     let mounted = true;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let authListener: { subscription: { unsubscribe: () => void } } | null = null;
 
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setIsLoading(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log("Auth event:", event);
-
-        // Handle token refresh failures
-        if (event === "SIGNED_OUT" || (event as string) === "TOKEN_REFRESH_FAILED") {
-          console.warn("Auth session ended, logging out");
-          await supabase.auth.signOut();
-        }
-
-        setSession(session);
-      }
-    );
-    
     (async () => {
       try {
-        // Set timeout fallback to ensure loading always resolves
+        // Set timeout fallback to ensure loading always resolves quickly
         timeoutId = setTimeout(() => {
           if (mounted) {
             console.log("⏱️ Auth loading timeout - forcing completion");
             setIsLoading(false);
           }
-        }, 3000) as ReturnType<typeof setTimeout>; // 3 second max timeout
+        }, 2000) as ReturnType<typeof setTimeout>; // 2 second max timeout for faster loading
 
+        // Get initial session
         const {
           data: { session },
+          error: sessionError,
         } = await supabase.auth.getSession();
         
         if (!mounted) return;
         
+        // Handle refresh token errors gracefully
+        if (sessionError) {
+          console.log("Session error (may be expired):", sessionError.message);
+          // If refresh token is invalid, clear session but don't crash
+          if (sessionError.message?.includes('refresh') || sessionError.message?.includes('token')) {
+            try {
+              await supabase.auth.signOut();
+            } catch (e) {
+              console.log("Sign out error:", e);
+            }
+            setSession(null);
+            setUser(null);
+            setProfile(null);
+            setGym(null);
+            setIsLoading(false);
+            return;
+          }
+        }
+        
         setSession(session);
         setUser(session?.user ?? null);
         
-        // Fetch profile with timeout protection
+        // Fetch profile BEFORE setting isLoading to false
+        // This ensures profile is available for routing decisions
         if (session?.user) {
           try {
-            await Promise.race([
-              fetchProfile(session.user.id),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Profile fetch timeout')), 2000)
-              )
-            ]).catch((err) => {
-              console.log("Profile fetch timeout or error:", err);
-              // Continue even if profile fetch fails
-            });
+            await fetchProfile(session.user.id);
           } catch (err) {
             console.log("Profile fetch error:", err);
           }
         }
+        
+        setIsLoading(false);
       } catch (e) {
         console.log("getSession error", e);
+        if (mounted) setIsLoading(false);
       } finally {
         if (timeoutId) clearTimeout(timeoutId);
-        if (mounted) setIsLoading(false);
       }
     })();
 
-    const { data: listener2 } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+    // Single auth state change listener
+    const { data: authListenerData } = supabase.auth.onAuthStateChange(
+      async (event, newSession) => {
+        if (!mounted) return;
+        
         console.log("Auth event:", event);
 
-        // Handle token refresh failures
+        // Handle token refresh failures gracefully
         if (event === "SIGNED_OUT" || (event as string) === "TOKEN_REFRESH_FAILED") {
-          console.warn("Auth session ended, logging out");
-          await supabase.auth.signOut();
+          console.warn("Auth session ended");
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setGym(null);
+          return;
         }
 
-        setSession(session);
-      }
-    );
-
-    
-
-    return () => {
-      mounted = false;
-      listener.subscription.unsubscribe();
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, []); // Empty array - only runs once
-
-  // auth listener - RUNS ONLY ONCE ON MOUNT
-  useEffect(() => {
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      async (_event, newSession) => {
         setSession(newSession);
         setUser(newSession?.user ?? null);
+        
         if (newSession?.user) {
-          await fetchProfile(newSession.user.id);
+          // Fetch profile when session changes (e.g., after login)
+          fetchProfile(newSession.user.id).catch((err) => {
+            console.log("Profile fetch error:", err);
+          });
         } else {
           setProfile(null);
           setGym(null);
         }
       }
     );
+    authListener = authListenerData;
 
     return () => {
-      try {
-        listener.subscription.unsubscribe();
-      } catch (e) {console.log(e);
+      mounted = false;
+      if (timeoutId) clearTimeout(timeoutId);
+      if (authListener?.subscription) {
+        try {
+          authListener.subscription.unsubscribe();
+        } catch (e) {
+          console.log("Unsubscribe error:", e);
+        }
       }
     };
   }, []); // Empty array - only runs once
 
-// const signIn = async (email: string, password: string, role?: string) => {
-const signIn = async (email: string, password: string) => {
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
-  return { error };
-};
+  const signIn = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    return { error };
+  };
 
- const signUp = async (
-  email: string,
-  password: string,
-  fullName: string,
-  role: string
-) => {
-  if (!email || !password) {
-    return { error: new Error("Email and password required") };
-  }
+  const signUp = async (
+    email: string,
+    password: string,
+    fullName: string,
+    role: string
+  ) => {
+    if (!email || !password) {
+      return { error: new Error("Email and password required") };
+    }
 
-  if (password.length < 6) {
-    return { error: new Error("Password must be at least 6 characters") };
-  }
+    if (password.length < 6) {
+      return { error: new Error("Password must be at least 6 characters") };
+    }
 
-  const { error } = await supabase.auth.signUp({
-    email: email.trim(),
-    password,
-    options: {
-      data: {
-        full_name: fullName?.trim() || null,
-        role: role?.trim().toLowerCase() || "user",
+    const { error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        data: {
+          full_name: fullName?.trim() || null,
+          role: role?.trim().toLowerCase() || "user",
+        },
       },
-    },
-  });
+    });
 
-  return { error };
-};
-
+    return { error };
+  };
 
   const signOut = async () => {
     try {

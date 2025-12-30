@@ -48,7 +48,8 @@ export default function LoginScreen() {
     ]).start();
   }, []);
 
- 
+  // Removed AsyncStorage.clear() - it was causing refresh token issues
+  // Only clear on explicit logout, not on every login screen mount
 
   const styles = StyleSheet.create({
     safeArea: {

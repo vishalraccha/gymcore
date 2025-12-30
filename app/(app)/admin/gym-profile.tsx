@@ -124,7 +124,7 @@ export default function GymProfileScreen() {
         .from('gym_payment_accounts')
         .select('*')
         .eq('gym_id', profile.gym_id)
-        .single();
+        .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
         // PGRST116 = no rows returned, which is fine
@@ -792,7 +792,7 @@ export default function GymProfileScreen() {
       </Card>
 
       {/* PAYMENT ACCOUNT SECTION */}
-      {hasGym && (
+      {/* {hasGym && (
         <Card style={styles.formCard}>
           <View style={styles.inputHeader}>
             <CreditCard size={24} color={theme.colors.primary} />
@@ -939,7 +939,7 @@ export default function GymProfileScreen() {
             </View>
           </View>
         </Card>
-      )}
+      )} */}
 
       {/* QUICK STATS */}
       {hasGym && gymData.created_at && (

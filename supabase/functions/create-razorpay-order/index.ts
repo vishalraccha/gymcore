@@ -63,12 +63,15 @@ serve(async (req) => {
     const token = authHeader.replace('Bearer ', '');
     
     // Create Supabase client
-    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: {
-        headers: { Authorization: authHeader },
-      },
-    });
-
+    const supabaseClient = createClient(
+      SUPABASE_URL,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, // Use service role key
+      {
+        auth: {
+          persistSession: false, // Don't persist in edge functions
+        },
+      }
+    );
     // Verify user
     console.log('🔵 Verifying user...');
     const {
@@ -151,7 +154,7 @@ serve(async (req) => {
         .select('*')
         .eq('gym_id', plan.gym_id)
         .eq('is_active', true)
-        .single();
+        .maybeSingle();
 
       if (paymentAccount) {
         gymPaymentAccount = paymentAccount;
