@@ -13,7 +13,7 @@ interface SafeAreaWrapperProps {
 export default function SafeAreaWrapper({ 
   children, 
   style,
-  edges = ['top', 'left', 'right'] // Don't include bottom by default (tab bar handles it)
+  edges = ['top'] // Don't include bottom by default (tab bar handles it)
 }: SafeAreaWrapperProps) {
   const { theme } = useTheme();
   

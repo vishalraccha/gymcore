@@ -40,16 +40,21 @@ export default function TabLayout() {
     <>
       <Tabs
         screenOptions={{
-          tabBarActiveTintColor: theme.colors.tabBarActive, // Changed
-        tabBarInactiveTintColor: theme.colors.tabBarInactive, // Changed
+          tabBarActiveTintColor: theme.colors.tabBarActive,
+          tabBarInactiveTintColor: theme.colors.tabBarInactive,
           headerShown: false,
           tabBarStyle: {
-            backgroundColor: theme.colors.card, // Changed
+            backgroundColor: theme.colors.card,
             borderTopColor: theme.colors.border,
             borderTopWidth: 1,
             paddingBottom: Platform.OS === 'ios' ? 20 : 8,
             paddingTop: 8,
             height: Platform.OS === 'ios' ? 85 : 65,
+          },
+          tabBarLabelStyle: {
+            fontSize: 11,
+            fontWeight: '600',
+            marginTop: 4,
           },
         }}
       >
@@ -77,15 +82,21 @@ export default function TabLayout() {
                     strokeWidth={focused ? 2.5 : 2}
                   />
                   {isLocked && (
-                    <View style={[styles.lockBadge, { backgroundColor: theme.colors.lockBg, borderColor: theme.colors.lockBorder }]}>
+                    <View style={[styles.lockBadge, { 
+                      backgroundColor: theme.colors.lockBg, 
+                      borderColor: theme.colors.lockBorder 
+                    }]}>
                       <Text style={styles.lockText}>🔒</Text>
                     </View>
                   )}
                 </View>
               );
             },
-            tabBarLabel: ({ color }) => (
-              <Text style={[styles.tabLabel, { color: !hasPremiumAccess ? theme.colors.border : color }]}>
+            tabBarLabel: ({ color, focused }) => (
+              <Text style={[
+                styles.tabLabel, 
+                { color: !hasPremiumAccess ? theme.colors.border : color }
+              ]}>
                 Workouts
               </Text>
             ),
@@ -115,15 +126,21 @@ export default function TabLayout() {
                     strokeWidth={focused ? 2.5 : 2}
                   />
                   {isLocked && (
-                    <View style={[styles.lockBadge, { backgroundColor: theme.colors.lockBg, borderColor: theme.colors.lockBorder }]}>
+                    <View style={[styles.lockBadge, { 
+                      backgroundColor: theme.colors.lockBg, 
+                      borderColor: theme.colors.lockBorder 
+                    }]}>
                       <Text style={styles.lockText}>🔒</Text>
                     </View>
                   )}
                 </View>
               );
             },
-            tabBarLabel: ({ color }) => (
-              <Text style={[styles.tabLabel, { color: !hasPremiumAccess ? theme.colors.border : color }]}>
+            tabBarLabel: ({ color, focused }) => (
+              <Text style={[
+                styles.tabLabel, 
+                { color: !hasPremiumAccess ? theme.colors.border : color }
+              ]}>
                 Diet
               </Text>
             ),
@@ -153,15 +170,21 @@ export default function TabLayout() {
                     strokeWidth={focused ? 2.5 : 2}
                   />
                   {isLocked && (
-                    <View style={[styles.lockBadge, { backgroundColor: theme.colors.lockBg, borderColor: theme.colors.lockBorder }]}>
+                    <View style={[styles.lockBadge, { 
+                      backgroundColor: theme.colors.lockBg, 
+                      borderColor: theme.colors.lockBorder 
+                    }]}>
                       <Text style={styles.lockText}>🔒</Text>
                     </View>
                   )}
                 </View>
               );
             },
-            tabBarLabel: ({ color }) => (
-              <Text style={[styles.tabLabel, { color: !hasPremiumAccess ? theme.colors.border : color }]}>
+            tabBarLabel: ({ color, focused }) => (
+              <Text style={[
+                styles.tabLabel, 
+                { color: !hasPremiumAccess ? theme.colors.border : color }
+              ]}>
                 Progress
               </Text>
             ),
@@ -184,6 +207,11 @@ export default function TabLayout() {
             tabBarIcon: ({ color, focused }) => (
               <CreditCard size={24} color={color} strokeWidth={focused ? 2.5 : 2} />
             ),
+            tabBarLabel: ({ color, focused }) => (
+              <Text style={[styles.tabLabel, { color }]}>
+                Plans
+              </Text>
+            ),
           }}
         />
 
@@ -193,6 +221,11 @@ export default function TabLayout() {
             title: 'Profile',
             tabBarIcon: ({ color, focused }) => (
               <User size={24} color={color} strokeWidth={focused ? 2.5 : 2} />
+            ),
+            tabBarLabel: ({ color, focused }) => (
+              <Text style={[styles.tabLabel, { color }]}>
+                Profile
+              </Text>
             ),
           }}
         />

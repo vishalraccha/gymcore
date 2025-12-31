@@ -1060,7 +1060,7 @@ export default function AnalyticsScreen() {
   }
 
   return (
-    <SafeAreaWrapper>
+    <SafeAreaWrapper >
       <Animated.ScrollView
         style={[styles.container, { opacity: fadeAnim }]}
         showsVerticalScrollIndicator={false}
