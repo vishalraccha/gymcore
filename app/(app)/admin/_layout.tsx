@@ -55,10 +55,7 @@ export default function AdminTabsLayout() {
         name="index"
         options={{ title: "Dashboard", tabBarIcon: ({ size, color }) => <Home size={size} color={color} /> }}
       />
-      <Tabs.Screen
-        name="gym-profile"
-        options={{ title: "Gym", tabBarIcon: ({ size, color }) => <Settings size={size} color={color} /> }}
-      />
+     
       <Tabs.Screen
         name="members"
         options={{ title: "Members", tabBarIcon: ({ size, color }) => <Users size={size} color={color} /> }}
@@ -78,6 +75,10 @@ export default function AdminTabsLayout() {
       <Tabs.Screen
         name="personal-training"
         options={{ title: "Personal Training", tabBarIcon: ({ size, color }) => <UserCheck size={size} color={color} /> }}
+      />
+       <Tabs.Screen
+        name="gym-profile"
+        options={{ title: "Gym", tabBarIcon: ({ size, color }) => <Settings size={size} color={color} /> }}
       />
     </Tabs>
   );

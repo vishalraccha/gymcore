@@ -101,6 +101,12 @@ export default function MembersScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [fadeAnim] = useState(new Animated.Value(0));
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'expired'>('all');
+  const [showRenewModal, setShowRenewModal] = useState(false);
+const [renewSubscription, setRenewSubscription] = useState<any>(null);
+const [renewAmountReceived, setRenewAmountReceived] = useState('');
+const [renewPaymentMethod, setRenewPaymentMethod] = useState<'cash' | 'online'>('cash');
+const [renewReceiptNumber, setRenewReceiptNumber] = useState('');
+const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
 
   useEffect(() => {
     if (profile?.role === 'admin' || profile?.role === 'gym_owner') {
@@ -167,88 +173,115 @@ export default function MembersScreen() {
   const fetchMembers = async () => {
     try {
       let query = supabase.from('profiles').select('*');
-
+  
       if (profile?.role === 'gym_owner' && profile.gym_id) {
         query = query.eq('gym_id', profile.gym_id).eq('role', 'member');
       } else {
         query = query.eq('role', 'member');
       }
-
+  
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
-
+  
+      // Get today's date for comparison
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayString = today.toISOString().split('T')[0];
+  
       const membersWithDetails = await Promise.all(
         (data || []).map(async (member) => {
           // Fetch stats
           const stats = await fetchMemberStats(member.id);
-
-          // Fetch active subscription
-          // Fetch active subscription with correct payment amounts
-          const { data: subscription } = await supabase
+  
+          // Fetch ALL subscriptions for this member
+          const { data: allUserSubscriptions } = await supabase
             .from('user_subscriptions')
             .select(`
-  *,
-  subscription:subscription_id (
-    name,
-    price,
-    duration_months
-  )
-`)
+              *,
+              subscription:subscription_id (
+                name,
+                price,
+                duration_months,
+                duration_days
+              )
+            `)
             .eq('user_id', member.id)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          // If subscription exists, ensure amounts are calculated correctly
-          if (subscription) {
-            const totalAmount = subscription.total_amount || subscription.subscription?.price || 0;
-            const paidAmount = subscription.paid_amount || subscription.amount_paid || 0;
-            const pendingAmount = subscription.pending_amount !== undefined
-              ? subscription.pending_amount
-              : Math.max(0, totalAmount - paidAmount);
-
-            subscription.paid_amount = paidAmount;
-            subscription.pending_amount = pendingAmount;
-            subscription.total_amount = totalAmount;
+            .order('created_at', { ascending: false });
+  
+          // Find the currently active subscription (end_date >= today)
+          let currentSubscription = null;
+          let subscriptionStatus: 'active' | 'expired' | 'none' = 'none';
+  
+          if (allUserSubscriptions && allUserSubscriptions.length > 0) {
+            // Find subscription that hasn't expired yet
+            const activeSubscription = allUserSubscriptions.find((sub: any) => {
+              if (!sub.end_date) return false;
+              return sub.end_date >= todayString;
+            });
+  
+            if (activeSubscription) {
+              currentSubscription = activeSubscription;
+              subscriptionStatus = 'active';
+            } else {
+              // All expired, use most recent
+              currentSubscription = allUserSubscriptions[0];
+              subscriptionStatus = 'expired';
+            }
+  
+            // Sync pending amount from invoice if subscription exists
+            if (currentSubscription) {
+              const { data: invoice } = await supabase
+                .from('invoices')
+                .select('remaining_amount, payment_status')
+                .eq('user_id', member.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+  
+              if (invoice) {
+                const remainingAmount = Number(invoice.remaining_amount) || 0;
+                currentSubscription.pending_amount = remainingAmount;
+                currentSubscription.payment_status = remainingAmount > 0 ? 'partial' : 'completed';
+              }
+  
+              // Ensure all amounts are set
+              const subscriptionPrice = currentSubscription.subscription?.price || 0;
+              currentSubscription.total_amount = currentSubscription.total_amount || subscriptionPrice;
+              currentSubscription.paid_amount = currentSubscription.amount_paid || currentSubscription.paid_amount || 0;
+              currentSubscription.amount_paid = currentSubscription.paid_amount; // Ensure both fields are set
+              
+              if (currentSubscription.pending_amount === undefined) {
+                currentSubscription.pending_amount = Math.max(0, currentSubscription.total_amount - currentSubscription.paid_amount);
+              }
+            }
           }
-
+  
           // Fetch attendance for current month
           const startOfMonth = new Date();
           startOfMonth.setDate(1);
           startOfMonth.setHours(0, 0, 0, 0);
-
+  
           const { data: attendanceData } = await supabase
             .from('attendance')
             .select('*')
             .eq('user_id', member.id)
             .gte('attendance_date', startOfMonth.toISOString().split('T')[0]);
-
+  
           const totalCheckIns = attendanceData?.length || 0;
-
-          // Calculate expected check-ins (assume 30 days in month, can be adjusted)
-          const today = new Date();
-          const daysInMonth = today.getDate();
-          const expectedCheckIns = daysInMonth; // Expected 1 per day
-
-          // Determine subscription status
-          let subscriptionStatus: 'active' | 'expired' | 'none' = 'none';
-          if (subscription) {
-            const endDate = new Date(subscription.end_date);
-            const isActive = endDate >= new Date() && subscription.is_active;
-            subscriptionStatus = isActive ? 'active' : 'expired';
-          }
-
+          const daysInMonth = new Date().getDate();
+          const expectedCheckIns = daysInMonth;
+  
           return {
             ...member,
             stats,
-            currentSubscription: subscription || null,
+            currentSubscription: currentSubscription || null,
             totalCheckIns,
             expectedCheckIns,
             subscriptionStatus,
           };
         })
       );
-
+  
       setMembers(membersWithDetails);
     } catch (error) {
       console.error('Error fetching members:', error);
@@ -293,21 +326,113 @@ export default function MembersScreen() {
     }
   };
 
+  const calculateRemainingDays = (endDate: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(0, 0, 0, 0);
+    const diffTime = end.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
   const fetchMemberDetails = async (memberId: string) => {
     try {
       setIsLoading(true);
+      
+      // Fetch member data
       const { data: memberData, error: memberError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', memberId)
         .single();
-
+  
       if (memberError) throw memberError;
-
+  
+      // Fetch stats
       const stats = await fetchMemberStats(memberId);
-      setSelectedMember({ ...memberData, stats });
+  
+      // Get today's date for comparison
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+  
+      // Fetch ALL subscriptions for this member
+      const { data: allUserSubscriptions } = await supabase
+        .from('user_subscriptions')
+        .select(`
+          *,
+          subscription:subscription_id (
+            name,
+            price,
+            duration_months,
+            duration_days
+          )
+        `)
+        .eq('user_id', memberId)
+        .order('created_at', { ascending: false });
+  
+      // Find active subscription based on end_date only
+      let currentSubscription = null;
+      let subscriptionStatus: 'active' | 'expired' | 'none' = 'none';
+  
+      if (allUserSubscriptions && allUserSubscriptions.length > 0) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayString = today.toISOString().split('T')[0];
+        
+        // Find subscription that hasn't expired yet (same logic as fetchMembers)
+        const activeSubscription = allUserSubscriptions.find((sub: any) => {
+          if (!sub.end_date) return false;
+          return sub.end_date >= todayString;
+        });
+      
+        if (activeSubscription) {
+          currentSubscription = activeSubscription;
+          subscriptionStatus = 'active';
+        } else {
+          // All expired, use most recent
+          currentSubscription = allUserSubscriptions[0];
+          subscriptionStatus = 'expired';
+        }
+      
+        // Rest of the sync code remains the same...
+  
+        // Sync pending amount from invoice if subscription exists
+        if (currentSubscription) {
+          const { data: invoice } = await supabase
+            .from('invoices')
+            .select('remaining_amount, payment_status')
+            .eq('user_id', memberId)
+            .or(`items->0->user_subscription_id.eq.${currentSubscription.id}`)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+  
+          if (invoice) {
+            const remainingAmount = Number(invoice.remaining_amount) || 0;
+            currentSubscription.pending_amount = remainingAmount;
+            currentSubscription.payment_status = remainingAmount > 0 ? 'partial' : 'completed';
+          }
+  
+          // Ensure all amount fields are set correctly
+          const subscriptionPrice = currentSubscription.subscription?.price || 0;
+          currentSubscription.total_amount = currentSubscription.total_amount || subscriptionPrice;
+          currentSubscription.paid_amount = currentSubscription.amount_paid || currentSubscription.paid_amount || 0;
+          currentSubscription.pending_amount = currentSubscription.pending_amount !== undefined 
+            ? currentSubscription.pending_amount 
+            : Math.max(0, currentSubscription.total_amount - currentSubscription.paid_amount);
+        }
+      }
+  
+      setSelectedMember({ 
+        ...memberData, 
+        stats,
+        currentSubscription,
+        subscriptionStatus,
+      });
       setShowMemberDetails(true);
     } catch (error) {
+      console.error('Error fetching member details:', error);
       Alert.alert('Error', 'Failed to fetch member details');
     } finally {
       setIsLoading(false);
@@ -540,6 +665,167 @@ export default function MembersScreen() {
         },
       ]
     );
+  };
+
+  const renewMemberSubscription = async () => {
+    if (!selectedMember || !renewSubscription) {
+      Alert.alert('Error', 'Please select a subscription plan');
+      return;
+    }
+
+    if (selectedMember.currentSubscription && selectedMember.currentSubscription.pending_amount > 0) {
+      Alert.alert(
+        'Pending Payment',
+        `This member has a pending amount of ₹${selectedMember.currentSubscription.pending_amount.toFixed(2)} on their current subscription. Please clear this before renewing.`,
+        [
+          { text: 'OK', style: 'cancel' },
+          {
+            text: 'Pay Now',
+            onPress: () => {
+              // Close renewal modal and show payment option
+              setShowRenewModal(false);
+              Alert.alert('Info', 'Please collect the pending payment first, then proceed with renewal.');
+            }
+          }
+        ]
+      );
+      return;
+    }
+  
+    if (renewPaymentMethod === 'cash') {
+      if (!renewAmountReceived || parseFloat(renewAmountReceived) <= 0) {
+        Alert.alert('Error', 'Please enter amount received');
+        return;
+      }
+  
+      const received = parseFloat(renewAmountReceived);
+      const planPrice = renewSubscription.price;
+  
+      if (received > planPrice) {
+        Alert.alert('Error', 'Amount received cannot exceed plan price');
+        return;
+      }
+    }
+  
+    setIsLoading(true);
+  
+    try {
+      // Calculate new dates
+      const startDate = new Date();
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + (renewSubscription.duration_days || renewSubscription.duration_months * 30));
+  
+      const received = renewPaymentMethod === 'cash' ? parseFloat(renewAmountReceived) : 0;
+      const pending = renewPaymentMethod === 'cash' ? Math.max(0, renewSubscription.price - received) : renewSubscription.price;
+      const paymentStatus = renewPaymentMethod === 'cash' 
+        ? (pending === 0 ? 'completed' : 'partial')
+        : 'pending';
+  
+      // Create new subscription
+      const { data: newSubscription, error: subError } = await supabase
+        .from('user_subscriptions')
+        .insert([{
+          user_id: selectedMember.id,
+          subscription_id: renewSubscription.id,
+          start_date: startDate.toISOString().split('T')[0],
+          end_date: endDate.toISOString().split('T')[0],
+          amount_paid: received,
+          pending_amount: pending,
+          total_amount: renewSubscription.price,
+          payment_status: paymentStatus,
+          payment_method: renewPaymentMethod,
+          is_active: renewPaymentMethod === 'cash' && pending === 0,
+          currency: 'INR',
+          gym_id: profile?.gym_id,
+          created_by: profile?.id,
+          payment_notes: renewPaymentNotes || null,
+        }])
+        .select()
+        .single();
+  
+      if (subError) throw subError;
+  
+      // If cash payment, create payment record and invoice
+      if (renewPaymentMethod === 'cash' && received > 0) {
+        const receiptNum = renewReceiptNumber || `REC-${Date.now()}`;
+  
+        // Create cash payment record
+        const { data: payment, error: paymentError } = await supabase
+          .from('cash_payments')
+          .insert([{
+            user_id: selectedMember.id,
+            gym_id: profile?.gym_id,
+            amount: received,
+            currency: 'INR',
+            receipt_number: receiptNum,
+            payment_date: new Date().toISOString(),
+            received_by: profile?.id,
+            notes: renewPaymentNotes || `Renewal payment for ${renewSubscription.name}`,
+          }])
+          .select()
+          .single();
+  
+        if (paymentError) throw paymentError;
+  
+        // Create invoice
+        const { error: invoiceError } = await supabase
+          .from('invoices')
+          .insert([{
+            invoice_number: `INV-${Date.now()}`,
+            user_id: selectedMember.id,
+            gym_id: profile?.gym_id,
+            subscription_id: newSubscription.id,
+            payment_type: 'cash',
+            amount: renewSubscription.price,
+            currency: 'INR',
+            tax_amount: 0,
+            total_amount: renewSubscription.price,
+            remaining_amount: pending,
+            payment_status: paymentStatus,
+            invoice_date: new Date().toISOString(),
+            payment_id: payment.id,
+            items: JSON.stringify([{
+              description: `${renewSubscription.name} - Renewal`,
+              quantity: 1,
+              rate: renewSubscription.price,
+              amount: renewSubscription.price,
+            }]),
+          }]);
+  
+        if (invoiceError) throw invoiceError;
+      }
+  
+      // Deactivate old subscription
+      if (selectedMember.currentSubscription) {
+        await supabase
+          .from('user_subscriptions')
+          .update({ is_active: false })
+          .eq('id', selectedMember.currentSubscription.id);
+      }
+  
+      // Reset form
+      setRenewSubscription(null);
+      setRenewAmountReceived('');
+      setRenewPaymentMethod('cash');
+      setRenewReceiptNumber('');
+      setRenewPaymentNotes('');
+      setShowRenewModal(false);
+  
+      // Refresh data
+      await fetchMembers();
+      await fetchMemberDetails(selectedMember.id);
+  
+      const message = renewPaymentMethod === 'cash'
+        ? `Subscription renewed! Paid: ₹${received}, Pending: ₹${pending.toFixed(2)}`
+        : 'Subscription created! Payment pending.';
+  
+      Alert.alert('Success', message);
+    } catch (error: any) {
+      console.error('Error renewing subscription:', error);
+      Alert.alert('Error', error.message || 'Failed to renew subscription');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const styles = StyleSheet.create({
@@ -1935,6 +2221,137 @@ export default function MembersScreen() {
                     </Text>
                   </Card>
 
+                  {/* Current Subscription Info */}
+<Card style={styles.overviewCard}>
+  <Text style={styles.sectionTitle}>Subscription Details</Text>
+  
+  {selectedMember.currentSubscription ? (
+    <>
+      <View style={{ gap: 12 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.inputLabel}>Plan Name:</Text>
+          <Text style={styles.overviewName}>
+            {selectedMember.currentSubscription.subscription?.name || 'N/A'}
+          </Text>
+        </View>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+  <Text style={styles.memberName}>{members.full_name}</Text>
+  {members.subscriptionStatus === 'active' && members.currentSubscription && (
+    <View style={styles.activeBadge}>
+      <CheckCircle size={12} color={COLORS.success} />
+      <Text style={styles.activeBadgeText}>Active</Text>
+    </View>
+  )}
+  {members.subscriptionStatus === 'expired' && members.currentSubscription && (
+    <View style={styles.expiredBadge}>
+      <AlertCircle size={12} color={COLORS.error} />
+      <Text style={styles.expiredBadgeText}>Expired</Text>
+    </View>
+  )}
+  {members.subscriptionStatus === 'none' && (
+    <View style={[styles.expiredBadge, { backgroundColor: COLORS.warningLight }]}>
+      <AlertCircle size={12} color={COLORS.warning} />
+      <Text style={[styles.expiredBadgeText, { color: COLORS.warning }]}>No Plan</Text>
+    </View>
+  )}
+</View>
+
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.inputLabel}>Start Date:</Text>
+          <Text style={styles.subscriptionDate}>
+            {new Date(selectedMember.currentSubscription.start_date).toLocaleDateString()}
+          </Text>
+        </View>
+
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.inputLabel}>End Date:</Text>
+          <Text style={styles.subscriptionDate}>
+            {new Date(selectedMember.currentSubscription.end_date).toLocaleDateString()}
+          </Text>
+        </View>
+
+        <View style={{ 
+          flexDirection: 'row', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          paddingVertical: 12,
+          paddingHorizontal: 16,
+          backgroundColor: selectedMember.subscriptionStatus === 'active' 
+            ? COLORS.successLight 
+            : COLORS.errorLight,
+          borderRadius: 8,
+        }}>
+          <Text style={[styles.inputLabel, { 
+            color: selectedMember.subscriptionStatus === 'active' 
+              ? COLORS.success 
+              : COLORS.error,
+            fontWeight: '700',
+          }]}>
+            {selectedMember.subscriptionStatus === 'active' ? 'Days Remaining:' : 'Days Expired:'}
+          </Text>
+          <Text style={[styles.overviewName, { 
+            color: selectedMember.subscriptionStatus === 'active' 
+              ? COLORS.success 
+              : COLORS.error,
+            fontSize: 24,
+          }]}>
+            {Math.abs(calculateRemainingDays(selectedMember.currentSubscription.end_date))} days
+          </Text>
+        </View>
+
+        <View style={styles.sectionDivider} />
+
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.inputLabel}>Total Amount:</Text>
+          <Text style={styles.paymentSummaryValue}>
+            {formatRupees(selectedMember.currentSubscription.total_amount || selectedMember.currentSubscription.subscription?.price || 0)}
+          </Text>
+        </View>
+
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.inputLabel}>Amount Paid:</Text>
+          <Text style={[styles.paymentSummaryValue, { color: COLORS.success }]}>
+            {formatRupees(selectedMember.currentSubscription.paid_amount || selectedMember.currentSubscription.amount_paid || 0)}
+          </Text>
+        </View>
+
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.inputLabel}>Pending Amount:</Text>
+          <Text style={[styles.paymentSummaryValue, { color: COLORS.warning }]}>
+            {formatRupees(selectedMember.currentSubscription.pending_amount || 0)}
+          </Text>
+        </View>
+      </View>
+
+      <Button
+        title="Renew Subscription"
+        onPress={() => {
+          setShowRenewModal(true);
+          setRenewSubscription(null);
+          setRenewAmountReceived('');
+          setRenewPaymentMethod('cash');
+        }}
+        style={{ marginTop: 20 }}
+      />
+    </>
+  ) : (
+    <>
+      <Text style={styles.noDataText}>No active subscription</Text>
+      <Button
+        title="Add Subscription"
+        onPress={() => {
+          setShowRenewModal(true);
+          setRenewSubscription(null);
+          setRenewAmountReceived('');
+          setRenewPaymentMethod('cash');
+        }}
+        style={{ marginTop: 12 }}
+      />
+    </>
+  )}
+</Card>
+
                   {/* Stats Cards */}
                   <View style={styles.statsGrid}>
                     <Card style={styles.statCard}>
@@ -2043,6 +2460,285 @@ export default function MembersScreen() {
             </ScrollView>
           </View>
         </Modal>
+
+        {/* Renewal Modal */}
+<Modal
+  visible={showRenewModal}
+  animationType="slide"
+  presentationStyle="pageSheet"
+  onRequestClose={() => setShowRenewModal(false)}
+>
+  <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
+    <View style={styles.modalContainer}>
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalTitle}>
+          {selectedMember?.currentSubscription ? 'Renew Subscription' : 'Add Subscription'}
+        </Text>
+        <TouchableOpacity
+          onPress={() => setShowRenewModal(false)}
+          style={styles.closeButton}
+          activeOpacity={0.7}
+        >
+          <X size={24} color={COLORS.text} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        style={styles.modalScrollView}
+        contentContainerStyle={styles.modalContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.helperText}>
+          Select a new subscription plan for {selectedMember?.full_name}
+        </Text>
+
+        <View style={styles.sectionDivider} />
+
+        {availableSubscriptions.length > 0 ? (
+          <>
+            <Text style={styles.inputLabel}>Select Plan *</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.subscriptionScroll}
+            >
+              {availableSubscriptions.map((sub) => (
+                <TouchableOpacity
+                  key={sub.id}
+                  style={[
+                    styles.subscriptionOption,
+                    renewSubscription?.id === sub.id && styles.subscriptionOptionSelected,
+                  ]}
+                  onPress={() => {
+                    setRenewSubscription(sub);
+                    setRenewAmountReceived('');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.subscriptionName,
+                      renewSubscription?.id === sub.id && styles.subscriptionNameSelected,
+                    ]}
+                  >
+                    {sub.name}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.subscriptionPrice,
+                      renewSubscription?.id === sub.id && styles.subscriptionPriceSelected,
+                    ]}
+                  >
+                    ₹{sub.price}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.subscriptionDuration,
+                      renewSubscription?.id === sub.id && styles.subscriptionDurationSelected,
+                    ]}
+                  >
+                    {sub.duration_months} month{sub.duration_months > 1 ? 's' : ''}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            {renewSubscription && (
+              <>
+                <Text style={styles.inputLabel}>Payment Method</Text>
+                <View style={styles.paymentMethodRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.paymentMethodOption,
+                      renewPaymentMethod === 'cash' && styles.paymentMethodOptionSelected,
+                    ]}
+                    onPress={() => setRenewPaymentMethod('cash')}
+                    activeOpacity={0.7}
+                  >
+                    <DollarSign
+                      size={20}
+                      color={renewPaymentMethod === 'cash' ? COLORS.cardBg : COLORS.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.paymentMethodText,
+                        renewPaymentMethod === 'cash' && styles.paymentMethodTextSelected,
+                      ]}
+                    >
+                      Cash
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.paymentMethodOption,
+                      renewPaymentMethod === 'online' && styles.paymentMethodOptionSelected,
+                    ]}
+                    onPress={() => setRenewPaymentMethod('online')}
+                    activeOpacity={0.7}
+                  >
+                    <CreditCard
+                      size={20}
+                      color={renewPaymentMethod === 'online' ? COLORS.cardBg : COLORS.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.paymentMethodText,
+                        renewPaymentMethod === 'online' && styles.paymentMethodTextSelected,
+                      ]}
+                    >
+                      Online
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {renewPaymentMethod === 'cash' && (
+                  <>
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.inputLabel}>Plan Amount</Text>
+                      <TextInput
+                        style={[styles.input, styles.inputReadonly]}
+                        value={`₹${renewSubscription.price}`}
+                        editable={false}
+                      />
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.inputLabel}>Amount Received *</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Enter amount received"
+                        placeholderTextColor={COLORS.textSecondary}
+                        value={renewAmountReceived}
+                        onChangeText={setRenewAmountReceived}
+                        keyboardType="decimal-pad"
+                      />
+                      <Text style={styles.helperText}>
+                        Enter the amount customer paid (can be partial)
+                      </Text>
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.inputLabel}>Pending Amount</Text>
+                      <TextInput
+                        style={[styles.input, styles.inputReadonly]}
+                        value={`₹${Math.max(
+                          0,
+                          renewSubscription.price - (parseFloat(renewAmountReceived) || 0)
+                        ).toFixed(2)}`}
+                        editable={false}
+                      />
+                    </View>
+
+                    {/* Payment Summary */}
+                    <View style={styles.paymentSummary}>
+                      <View style={styles.paymentSummaryRow}>
+                        <Text style={styles.paymentSummaryLabel}>Plan Amount:</Text>
+                        <Text style={styles.paymentSummaryValue}>₹{renewSubscription.price}</Text>
+                      </View>
+                      <View style={styles.paymentSummaryRow}>
+                        <Text style={styles.paymentSummaryLabel}>Amount Received:</Text>
+                        <Text style={styles.paymentSummaryValue}>
+                          ₹{renewAmountReceived ? parseFloat(renewAmountReceived).toFixed(2) : '0.00'}
+                        </Text>
+                      </View>
+                      <View style={[styles.paymentSummaryRow, styles.paymentSummaryTotal]}>
+                        <Text style={styles.paymentSummaryTotalLabel}>Pending Amount:</Text>
+                        <View style={{ alignItems: 'flex-end', gap: 8 }}>
+                          <Text style={styles.paymentSummaryTotalValue}>
+                            ₹
+                            {Math.max(
+                              0,
+                              renewSubscription.price - (parseFloat(renewAmountReceived) || 0)
+                            ).toFixed(2)}
+                          </Text>
+                          <View
+                            style={[
+                              styles.paymentStatusBadge,
+                              Math.max(
+                                0,
+                                renewSubscription.price - (parseFloat(renewAmountReceived) || 0)
+                              ) === 0
+                                ? styles.paymentStatusBadgeComplete
+                                : styles.paymentStatusBadgePartial,
+                            ]}
+                          >
+                            {Math.max(
+                              0,
+                              renewSubscription.price - (parseFloat(renewAmountReceived) || 0)
+                            ) === 0 ? (
+                              <>
+                                <CheckCircle size={14} color={COLORS.success} />
+                                <Text style={[styles.paymentStatusText, styles.paymentStatusTextComplete]}>
+                                  Fully Paid
+                                </Text>
+                              </>
+                            ) : (
+                              <>
+                                <AlertCircle size={14} color={COLORS.warning} />
+                                <Text style={[styles.paymentStatusText, styles.paymentStatusTextPartial]}>
+                                  Partial Payment
+                                </Text>
+                              </>
+                            )}
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.inputLabel}>Receipt Number (Optional)</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Auto-generated if left blank"
+                        placeholderTextColor={COLORS.textSecondary}
+                        value={renewReceiptNumber}
+                        onChangeText={setRenewReceiptNumber}
+                      />
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.inputLabel}>Payment Notes (Optional)</Text>
+                      <TextInput
+                        style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
+                        placeholder="Add any notes about this payment..."
+                        placeholderTextColor={COLORS.textSecondary}
+                        value={renewPaymentNotes}
+                        onChangeText={setRenewPaymentNotes}
+                        multiline
+                        numberOfLines={3}
+                      />
+                    </View>
+                  </>
+                )}
+
+                {renewPaymentMethod === 'online' && (
+                  <Text style={styles.helperText}>
+                    Member will complete online payment through the app. Subscription will be
+                    activated once payment is completed.
+                  </Text>
+                )}
+              </>
+            )}
+          </>
+        ) : (
+          <Text style={styles.helperText}>
+            No subscription plans available. Create plans in Subscriptions section.
+          </Text>
+        )}
+
+        <Button
+          title={selectedMember?.currentSubscription ? 'Renew Subscription' : 'Add Subscription'}
+          onPress={renewMemberSubscription}
+          isLoading={isLoading}
+          disabled={!renewSubscription}
+          style={styles.addButton}
+        />
+      </ScrollView>
+    </View>
+  </SafeAreaView>
+</Modal>
       </Animated.View>
     </SafeAreaView>
   );
