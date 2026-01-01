@@ -17,9 +17,9 @@ export interface InvoiceData {
   payment_id?: string;
   payment_type: 'cash' | 'online' | 'razorpay';
   amount: number; // paid amount
-  plan_amount: number; // original plan amount (without tax)
-  tax_amount?: number;
-  total_amount: number; // plan_amount + tax
+  plan_amount: number; // original plan amount
+  
+  total_amount: number; 
   items: InvoiceItem[];
   gym_id?: string;
 }
@@ -79,10 +79,9 @@ export async function createInvoice(data: InvoiceData): Promise<string> {
           
           // AMOUNTS - CORRECTED
           amount: paidAmount, // Amount paid in this transaction
-          original_total_amount: originalTotal, // Full amount (plan + tax)
+          original_total_amount: originalTotal, // Full amount 
           remaining_amount: Math.max(0, remainingAmount), // Ensure non-negative
           
-          tax_amount: data.tax_amount || 0,
           total_amount: originalTotal, // Same as original_total_amount
           currency: 'INR',
           
@@ -136,11 +135,8 @@ export async function createSubscriptionInvoice(
     // Plan amount (original price from subscription)
     const planAmount = subscription.price;
     
-    // Calculate GST (18%)
-    const taxAmount = Math.round(planAmount * 0.18 * 100) / 100;
     
-    // Total = Plan + Tax
-    const totalAmount = planAmount + taxAmount;
+    const totalAmount = planAmount;
 
     const items: InvoiceItem[] = [
       {
@@ -159,8 +155,7 @@ export async function createSubscriptionInvoice(
       payment_type: paymentType,
       amount: amount, // Paid amount
       plan_amount: planAmount, // Original plan amount
-      tax_amount: taxAmount,
-      total_amount: totalAmount, // Plan + Tax
+      total_amount: totalAmount, // Plan 
       items: items,
       gym_id: gymId,
     });

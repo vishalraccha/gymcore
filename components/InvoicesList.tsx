@@ -55,7 +55,6 @@ interface Invoice {
   gym_id?: string;
   payment_type: string;
   amount: number;
-  tax_amount: number;
   total_amount: number;
   currency: string;
   payment_status: string;
@@ -430,7 +429,7 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
                     <View style={styles.amountRow}>
                       <Text style={styles.amountLabel}>GST (18%)</Text>
                       <Text style={styles.amountValue}>
-                        {formatRupees(selectedInvoice.tax_amount || 0)}
+                        {formatRupees(0)}
                       </Text>
                     </View>
 

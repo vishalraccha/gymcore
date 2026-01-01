@@ -10,7 +10,6 @@ import {
   Dumbbell,
   UtensilsCrossed,
   TrendingUp,
-  CreditCard,
   User,
 } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -200,20 +199,7 @@ export default function TabLayout() {
           }}
         />
 
-        <Tabs.Screen
-          name="plans"
-          options={{
-            title: 'Plans',
-            tabBarIcon: ({ color, focused }) => (
-              <CreditCard size={24} color={color} strokeWidth={focused ? 2.5 : 2} />
-            ),
-            tabBarLabel: ({ color, focused }) => (
-              <Text style={[styles.tabLabel, { color }]}>
-                Plans
-              </Text>
-            ),
-          }}
-        />
+        
 
         <Tabs.Screen
           name="profile"

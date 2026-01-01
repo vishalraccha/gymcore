@@ -7,7 +7,7 @@ import { Workout } from '@/types/database';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import SafeAreaWrapper from '@/components/SafeAreaWrapper';
-import { Plus, Clock, Flame, CreditCard as Edit, Trash2, X } from 'lucide-react-native';
+import { Plus, Clock, Flame, Edit, Trash2, X } from 'lucide-react-native';
 
 
 export default function WorkoutsManagementScreen() {
@@ -204,7 +204,9 @@ export default function WorkoutsManagementScreen() {
       difficulty: workout.difficulty,
       calories_per_minute: workout.calories_per_minute?.toString() || '5',
       day_of_week: workout.day_of_week?.toString() || '',
-      instructions: workout.instructions?.join('\n') || '',
+      instructions: Array.isArray(workout.instructions) 
+      ? workout.instructions.join('\n') 
+      : workout.instructions || '',
     });
     setShowAddWorkout(true);
   };
@@ -721,9 +723,7 @@ export default function WorkoutsManagementScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <Text style={styles.helperText}>
-              Select a specific day or leave as "Any Day" for general workouts
-            </Text>
+           
 
             <TextInput
               style={[styles.input, styles.textArea]}

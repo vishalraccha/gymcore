@@ -41,7 +41,6 @@ CREATE TABLE IF NOT EXISTS invoices (
   payment_type text NOT NULL CHECK (payment_type IN ('cash', 'online', 'razorpay')),
   amount numeric(10,2) NOT NULL,
   currency text DEFAULT 'INR',
-  tax_amount numeric(10,2) DEFAULT 0,
   total_amount numeric(10,2) NOT NULL,
   payment_status text DEFAULT 'paid' CHECK (payment_status IN ('paid', 'pending', 'failed', 'refunded')),
   invoice_date timestamptz DEFAULT now(),

@@ -10,7 +10,6 @@ export interface Invoice {
   user_id: string;
   gym_id?: string;
   amount: number; // Paid amount
-  tax_amount: number;
   total_amount: number;
   currency: string;
   payment_type: string;
@@ -23,7 +22,7 @@ export interface Invoice {
   is_installment?: boolean;
   installment_number?: number;
   total_installments?: number;
-  original_total_amount?: number; // Plan amount + tax
+  original_total_amount?: number; 
   remaining_amount?: number;
   gym?: {
     name: string;
@@ -42,7 +41,6 @@ export interface Invoice {
  * Calculate paid and remaining amounts correctly
  */
 function calculateAmounts(invoice: Invoice) {
-  // Original total (plan + tax)
   const originalTotal = invoice.original_total_amount || invoice.total_amount;
   
   // Amount paid
@@ -59,8 +57,7 @@ function calculateAmounts(invoice: Invoice) {
     remainingAmount = 0;
   }
 
-  // Plan amount (excluding tax)
-  const planAmount = originalTotal - (invoice.tax_amount || 0);
+  const planAmount = originalTotal - (0);
 
   return { 
     paidAmount, 
@@ -522,7 +519,7 @@ export function generateInvoiceHTML(invoice: Invoice): string {
       
       <div class="amount-row">
         <span class="label">GST (18%)</span>
-        <span class="value">₹${formatCurrencyNumber(invoice.tax_amount || 0)}</span>
+        <span class="value">₹${formatCurrencyNumber(0)}</span>
       </div>
       
       <div class="amount-row total">
@@ -617,7 +614,6 @@ export function formatInvoiceForDisplay(invoice: any) {
     ...invoice,
     formattedPlanAmount: formatRupees(planAmount),
     formattedAmount: formatRupees(invoice.amount),
-    formattedTax: formatRupees(invoice.tax_amount || 0),
     formattedTotal: formatRupees(originalTotal),
     formattedPaid: formatRupees(paidAmount),
     formattedRemaining: formatRupees(remainingAmount),

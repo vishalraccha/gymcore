@@ -39,6 +39,8 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   refreshGym: () => Promise<void>;
+  isCreatingMember: boolean; // ⭐ NEW: Flag to prevent navigation during member creation
+  setIsCreatingMember: (value: boolean) => void; // ⭐ NEW: Setter for the flag
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -49,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [gym, setGym] = useState<Gym | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCreatingMember, setIsCreatingMember] = useState(false); // ⭐ NEW
 
   // fetch gym by id
   const fetchGym = useCallback(async (gymId: string) => {
@@ -186,6 +189,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         console.log("Auth event:", event);
 
+        // ⭐ NEW: Skip processing if we're creating a member
+        // This prevents navigation when admin creates a new member
+        if (isCreatingMember) {
+          console.log("🚫 Ignoring auth change - currently creating member");
+          return;
+        }
+
         // Handle token refresh failures gracefully
         if (event === "SIGNED_OUT" || (event as string) === "TOKEN_REFRESH_FAILED") {
           console.warn("Auth session ended");
@@ -223,7 +233,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     };
-  }, []); // Empty array - only runs once
+  }, [isCreatingMember,fetchProfile]); // ⭐ MODIFIED: Added isCreatingMember as dependency
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -285,6 +295,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signOut,
         refreshProfile,
         refreshGym,
+        isCreatingMember, // ⭐ NEW
+        setIsCreatingMember, // ⭐ NEW
       }}
     >
       {children}

@@ -12,11 +12,12 @@ import {
   Platform,
   Animated,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
-import { Profile, WorkoutLog, DietLog, Attendance } from '@/types/database';
+import { Profile, WorkoutLog, DietLog } from '@/types/database';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import {
@@ -35,41 +36,52 @@ import {
   DollarSign,
   CheckCircle,
   AlertCircle,
+  Calendar,
+  TrendingUp,
 } from 'lucide-react-native';
-import { createSubscriptionWithCashPayment } from '@/lib/cashPayment';
-import { createSubscriptionInvoice } from '@/lib/invoice';
+
 import { formatRupees } from '@/lib/currency';
 
-const COLORS = {
-  primary: '#3B82F6',
-  primaryLight: '#EEF2FF',
-  success: '#10B981',
-  successLight: '#D1FAE5',
-  warning: '#F59E0B',
-  warningLight: '#FEF3C7',
-  error: '#EF4444',
-  errorLight: '#FEE2E2',
-  background: '#F8FAFC',
-  cardBg: '#FFFFFF',
-  text: '#0F172A',
-  textSecondary: '#64748B',
-  border: '#E2E8F0',
+const showConfirm = (
+  title: string,
+  message: string,
+  onConfirm: () => void,
+  onCancel?: () => void
+) => {
+  if (Platform.OS === 'web') {
+    const confirmed = window.confirm(`${title}\n\n${message}`);
+    if (confirmed) {
+      onConfirm();
+    } else {
+      onCancel?.();
+    }
+  } else {
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel', onPress: onCancel },
+      { text: 'Delete', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+};
+
+const showAlert = (title: string, message: string) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
 };
 
 interface MemberDetails extends Profile {
   has_personal_training?: boolean;
   workout_logs?: WorkoutLog[];
   diet_logs?: DietLog[];
-  attendance?: Attendance[];
   stats?: {
     totalWorkouts: number;
     totalCaloriesBurned: number;
     totalMinutes: number;
     totalMeals: number;
-    avgSessionDuration: number;
-    lastWorkout: string;
   };
-  currentSubscription?: UserSubscription | null;
+  currentSubscription?: any | null;
   totalCheckIns?: number;
   expectedCheckIns?: number;
   subscriptionStatus?: 'active' | 'expired' | 'none';
@@ -77,7 +89,7 @@ interface MemberDetails extends Profile {
 
 export default function MembersScreen() {
   const { theme } = useTheme();
-  const { profile } = useAuth();
+  const { profile ,setIsCreatingMember} = useAuth();
   const [members, setMembers] = useState<MemberDetails[]>([]);
   const [filteredMembers, setFilteredMembers] = useState<MemberDetails[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -88,7 +100,7 @@ export default function MembersScreen() {
     full_name: '',
     email: '',
     phone: '',
-    password: '',
+    password: '123456',
     has_personal_training: false,
   });
   const [availableSubscriptions, setAvailableSubscriptions] = useState<any[]>([]);
@@ -102,11 +114,42 @@ export default function MembersScreen() {
   const [fadeAnim] = useState(new Animated.Value(0));
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'expired'>('all');
   const [showRenewModal, setShowRenewModal] = useState(false);
-const [renewSubscription, setRenewSubscription] = useState<any>(null);
-const [renewAmountReceived, setRenewAmountReceived] = useState('');
-const [renewPaymentMethod, setRenewPaymentMethod] = useState<'cash' | 'online'>('cash');
-const [renewReceiptNumber, setRenewReceiptNumber] = useState('');
-const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
+  const [renewSubscription, setRenewSubscription] = useState<any>(null);
+  const [renewAmountReceived, setRenewAmountReceived] = useState('');
+  const [renewPaymentMethod, setRenewPaymentMethod] = useState<'cash' | 'online'>('cash');
+  const [renewReceiptNumber, setRenewReceiptNumber] = useState('');
+  const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
+  const [showPayPendingModal, setShowPayPendingModal] = useState(false);
+  const [pendingPaymentAmount, setPendingPaymentAmount] = useState('');
+  const [pendingReceiptNumber, setPendingReceiptNumber] = useState('');
+  const [pendingPaymentNotes, setPendingPaymentNotes] = useState('');
+  const [showAttendanceCalendar, setShowAttendanceCalendar] = useState(false);
+  const [memberAttendance, setMemberAttendance] = useState<any[]>([]);
+  const [showPassword, setShowPassword] = useState(false);
+  // const [isCreatingMember, setIsCreatingMember] = useState(false);
+  const ensurePaymentFields = (subscription: any) => {
+    if (!subscription) return subscription;
+
+    const subscriptionPrice = subscription.subscription?.price || 0;
+
+    return {
+      ...subscription,
+      total_amount: subscription.total_amount || subscriptionPrice,
+      paid_amount: subscription.paid_amount || 0,
+      pending_amount: subscription.pending_amount !== undefined
+        ? subscription.pending_amount
+        : Math.max(0, (subscription.total_amount || subscriptionPrice) - (subscription.paid_amount || 0)),
+      payment_status: (() => {
+        const pending = subscription.pending_amount !== undefined
+          ? subscription.pending_amount
+          : Math.max(0, (subscription.total_amount || subscriptionPrice) - (subscription.paid_amount || 0));
+
+        if (pending === 0) return 'completed';
+        if ((subscription.paid_amount || 0) > 0) return 'partial';
+        return 'pending';
+      })()
+    };
+  };
 
   useEffect(() => {
     if (profile?.role === 'admin' || profile?.role === 'gym_owner') {
@@ -144,14 +187,12 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
   useEffect(() => {
     let filtered = members;
 
-    // Apply status filter
     if (filterStatus === 'active') {
       filtered = filtered.filter(m => m.subscriptionStatus === 'active');
     } else if (filterStatus === 'expired') {
       filtered = filtered.filter(m => m.subscriptionStatus === 'expired' || m.subscriptionStatus === 'none');
     }
 
-    // Apply search filter
     if (searchQuery.trim() !== '') {
       filtered = filtered.filter(
         (member) =>
@@ -173,27 +214,24 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
   const fetchMembers = async () => {
     try {
       let query = supabase.from('profiles').select('*');
-  
+
       if (profile?.role === 'gym_owner' && profile.gym_id) {
         query = query.eq('gym_id', profile.gym_id).eq('role', 'member');
       } else {
         query = query.eq('role', 'member');
       }
-  
+
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
-  
-      // Get today's date for comparison
+
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const todayString = today.toISOString().split('T')[0];
-  
+
       const membersWithDetails = await Promise.all(
         (data || []).map(async (member) => {
-          // Fetch stats
           const stats = await fetchMemberStats(member.id);
-  
-          // Fetch ALL subscriptions for this member
+
           const { data: allUserSubscriptions } = await supabase
             .from('user_subscriptions')
             .select(`
@@ -207,81 +245,69 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
             `)
             .eq('user_id', member.id)
             .order('created_at', { ascending: false });
-  
-          // Find the currently active subscription (end_date >= today)
+
           let currentSubscription = null;
           let subscriptionStatus: 'active' | 'expired' | 'none' = 'none';
-  
+
           if (allUserSubscriptions && allUserSubscriptions.length > 0) {
-            // Find subscription that hasn't expired yet
             const activeSubscription = allUserSubscriptions.find((sub: any) => {
               if (!sub.end_date) return false;
               return sub.end_date >= todayString;
             });
-  
+
             if (activeSubscription) {
               currentSubscription = activeSubscription;
               subscriptionStatus = 'active';
             } else {
-              // All expired, use most recent
               currentSubscription = allUserSubscriptions[0];
               subscriptionStatus = 'expired';
             }
-  
-            // Sync pending amount from invoice if subscription exists
+
             if (currentSubscription) {
-              const { data: invoice } = await supabase
-                .from('invoices')
-                .select('remaining_amount, payment_status')
-                .eq('user_id', member.id)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-  
-              if (invoice) {
-                const remainingAmount = Number(invoice.remaining_amount) || 0;
-                currentSubscription.pending_amount = remainingAmount;
-                currentSubscription.payment_status = remainingAmount > 0 ? 'partial' : 'completed';
-              }
-  
-              // Ensure all amounts are set
+              // Get data ONLY from user_subscriptions (PRIMARY SOURCE)
               const subscriptionPrice = currentSubscription.subscription?.price || 0;
+
+              // Ensure all amount fields exist
               currentSubscription.total_amount = currentSubscription.total_amount || subscriptionPrice;
-              currentSubscription.paid_amount = currentSubscription.amount_paid || currentSubscription.paid_amount || 0;
-              currentSubscription.amount_paid = currentSubscription.paid_amount; // Ensure both fields are set
-              
-              if (currentSubscription.pending_amount === undefined) {
-                currentSubscription.pending_amount = Math.max(0, currentSubscription.total_amount - currentSubscription.paid_amount);
+              currentSubscription.paid_amount = currentSubscription.paid_amount || 0;
+              currentSubscription.pending_amount = currentSubscription.pending_amount ||
+                Math.max(0, currentSubscription.total_amount - currentSubscription.paid_amount);
+
+              // Calculate payment status from pending_amount
+              if (currentSubscription.pending_amount === 0) {
+                currentSubscription.payment_status = 'completed';
+              } else if (currentSubscription.paid_amount > 0) {
+                currentSubscription.payment_status = 'partial';
+              } else {
+                currentSubscription.payment_status = 'pending';
               }
             }
           }
-  
-          // Fetch attendance for current month
+
           const startOfMonth = new Date();
           startOfMonth.setDate(1);
           startOfMonth.setHours(0, 0, 0, 0);
-  
+
           const { data: attendanceData } = await supabase
             .from('attendance')
             .select('*')
             .eq('user_id', member.id)
             .gte('attendance_date', startOfMonth.toISOString().split('T')[0]);
-  
+
           const totalCheckIns = attendanceData?.length || 0;
           const daysInMonth = new Date().getDate();
-          const expectedCheckIns = daysInMonth;
-  
+
           return {
             ...member,
             stats,
             currentSubscription: currentSubscription || null,
             totalCheckIns,
-            expectedCheckIns,
+            expectedCheckIns: daysInMonth,
             subscriptionStatus,
           };
         })
       );
-  
+
       setMembers(membersWithDetails);
     } catch (error) {
       console.error('Error fetching members:', error);
@@ -311,8 +337,6 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
         totalCaloriesBurned: Math.round(totalCaloriesBurned),
         totalMinutes,
         totalMeals,
-        avgSessionDuration: 0,
-        lastWorkout: '',
       };
     } catch (error) {
       return {
@@ -320,8 +344,6 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
         totalCaloriesBurned: 0,
         totalMinutes: 0,
         totalMeals: 0,
-        avgSessionDuration: 0,
-        lastWorkout: '',
       };
     }
   };
@@ -336,27 +358,42 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
     return diffDays;
   };
 
+  const fetchMemberAttendance = async (memberId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('user_id', memberId)
+        .order('attendance_date', { ascending: false });
+
+      if (error) throw error;
+
+      setMemberAttendance(data || []);
+      setShowAttendanceCalendar(true);
+    } catch (error) {
+      console.error('Error fetching attendance:', error);
+      Alert.alert('Error', 'Failed to fetch attendance records');
+    }
+  };
+
   const fetchMemberDetails = async (memberId: string) => {
     try {
       setIsLoading(true);
-      
-      // Fetch member data
+
       const { data: memberData, error: memberError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', memberId)
         .single();
-  
+
       if (memberError) throw memberError;
-  
-      // Fetch stats
+
       const stats = await fetchMemberStats(memberId);
-  
-      // Get today's date for comparison
+
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-  
-      // Fetch ALL subscriptions for this member
+      const todayString = today.toISOString().split('T')[0];
+
       const { data: allUserSubscriptions } = await supabase
         .from('user_subscriptions')
         .select(`
@@ -370,62 +407,47 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
         `)
         .eq('user_id', memberId)
         .order('created_at', { ascending: false });
-  
-      // Find active subscription based on end_date only
+
       let currentSubscription = null;
       let subscriptionStatus: 'active' | 'expired' | 'none' = 'none';
-  
+
       if (allUserSubscriptions && allUserSubscriptions.length > 0) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const todayString = today.toISOString().split('T')[0];
-        
-        // Find subscription that hasn't expired yet (same logic as fetchMembers)
         const activeSubscription = allUserSubscriptions.find((sub: any) => {
           if (!sub.end_date) return false;
           return sub.end_date >= todayString;
         });
-      
+
         if (activeSubscription) {
           currentSubscription = activeSubscription;
           subscriptionStatus = 'active';
         } else {
-          // All expired, use most recent
           currentSubscription = allUserSubscriptions[0];
           subscriptionStatus = 'expired';
         }
-      
-        // Rest of the sync code remains the same...
-  
-        // Sync pending amount from invoice if subscription exists
+
         if (currentSubscription) {
-          const { data: invoice } = await supabase
-            .from('invoices')
-            .select('remaining_amount, payment_status')
-            .eq('user_id', memberId)
-            .or(`items->0->user_subscription_id.eq.${currentSubscription.id}`)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-  
-          if (invoice) {
-            const remainingAmount = Number(invoice.remaining_amount) || 0;
-            currentSubscription.pending_amount = remainingAmount;
-            currentSubscription.payment_status = remainingAmount > 0 ? 'partial' : 'completed';
-          }
-  
-          // Ensure all amount fields are set correctly
+          // Get data ONLY from user_subscriptions (PRIMARY SOURCE)
           const subscriptionPrice = currentSubscription.subscription?.price || 0;
+
+          // Ensure all amount fields exist
           currentSubscription.total_amount = currentSubscription.total_amount || subscriptionPrice;
-          currentSubscription.paid_amount = currentSubscription.amount_paid || currentSubscription.paid_amount || 0;
-          currentSubscription.pending_amount = currentSubscription.pending_amount !== undefined 
-            ? currentSubscription.pending_amount 
-            : Math.max(0, currentSubscription.total_amount - currentSubscription.paid_amount);
+          currentSubscription.paid_amount = currentSubscription.paid_amount || 0;
+          currentSubscription.pending_amount = currentSubscription.pending_amount ||
+            Math.max(0, currentSubscription.total_amount - currentSubscription.paid_amount);
+
+          // Calculate payment status from pending_amount
+          if (currentSubscription.pending_amount === 0) {
+            currentSubscription.payment_status = 'completed';
+          } else if (currentSubscription.paid_amount > 0) {
+            currentSubscription.payment_status = 'partial';
+          } else {
+            currentSubscription.payment_status = 'pending';
+          }
         }
       }
-  
-      setSelectedMember({ 
-        ...memberData, 
+
+      setSelectedMember({
+        ...memberData,
         stats,
         currentSubscription,
         subscriptionStatus,
@@ -446,225 +468,400 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
     return Math.max(0, total - received);
   };
 
-  const addMember = async () => {
-    if (!newMember.full_name || !newMember.email || !newMember.password) {
-      Alert.alert('Error', 'Please fill in all required fields');
+  // ============================================
+// FINAL CORRECTED addMember FUNCTION
+// Copy this entire function into your MembersScreen
+// ============================================
+
+const addMember = async () => {
+  if (!newMember.full_name || !newMember.email || !newMember.password) {
+    Alert.alert('Error', 'Please fill in all required fields');
+    return;
+  }
+
+  if (newMember.password.length < 6) {
+    Alert.alert('Error', 'Password must be at least 6 characters');
+    return;
+  }
+
+  if ((paymentMethod === 'cash' || paymentMethod === 'online') && selectedSubscription) {
+    if (!amountReceived || parseFloat(amountReceived) <= 0) {
+      Alert.alert('Error', 'Please enter amount received');
       return;
     }
-
-    if (newMember.password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+    if (parseFloat(amountReceived) > selectedSubscription.price) {
+      Alert.alert('Error', 'Amount received cannot exceed plan price');
       return;
     }
+  }
+  setIsLoading(true);
+  setIsCreatingMember(true);
+  
+  try {
+    // Create user account
+    const { data: { session: adminSession } } = await supabase.auth.getSession();
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: newMember.email,
+      password: newMember.password,
+      options: {
+        emailRedirectTo: undefined,
+        data: {
+          full_name: newMember.full_name,
+          phone: newMember.phone || null,
+          role: 'member',
+          gym_id: profile?.gym_id ? String(profile.gym_id) : null,
+          has_personal_training: newMember.has_personal_training,
+        },
+      },
+    });
 
-    if (paymentMethod === 'cash' && selectedSubscription) {
+    if (authError) throw authError;
+    if (!authData.user) throw new Error('Failed to create user');
+
+    
+
+    const userId = authData.user.id;
+    if (adminSession) {
+      await supabase.auth.setSession({
+        access_token: adminSession.access_token,
+        refresh_token: adminSession.refresh_token,
+      });
+
+   }
+    // Wait for signOut to complete
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Handle personal training
+    if (newMember.has_personal_training && profile?.gym_id) {
+      await supabase
+        .from('profiles')
+        .update({ has_personal_training: true })
+        .eq('id', userId);
+
+      await supabase.from('personal_training_assignments').insert([{
+        user_id: userId,
+        gym_id: profile.gym_id,
+        assigned_by: profile.id,
+        is_active: true,
+        start_date: new Date().toISOString().split('T')[0],
+      }]);
+    }
+
+    // Handle subscription if selected
+    if ((paymentMethod === 'cash' || paymentMethod === 'online') && selectedSubscription) {
       try {
         const received = parseFloat(amountReceived);
-        const pending = calculatePendingAmount();
+        const pending = Math.max(0, selectedSubscription.price - received);
+        const paymentStatus = pending === 0 ? 'completed' : 'partial';
 
-        const { paymentId, userSubscriptionId, receiptNumber: generatedReceipt } =
-          await createSubscriptionWithCashPayment(
-            userId,
-            selectedSubscription.id,
-            received,
-            profile?.gym_id,
-            profile?.id,
-            receiptNumber || undefined
-          );
+        const startDate = new Date();
+        const endDate = new Date();
+        endDate.setDate(endDate.getDate() + (selectedSubscription.duration_days || selectedSubscription.duration_months * 30));
 
-        // Update with payment notes if provided
-        if (paymentNotes) {
-          await supabase
-            .from('user_subscriptions')
-            .update({
-              payment_notes: paymentNotes,
-            })
-            .eq('id', userSubscriptionId);
+        const { data: userSub, error: subError } = await supabase
+          .from('user_subscriptions')
+          .insert([{
+            user_id: userId,
+            subscription_id: selectedSubscription.id,
+            start_date: startDate.toISOString().split('T')[0],
+            end_date: endDate.toISOString().split('T')[0],
+            total_amount: selectedSubscription.price,
+            paid_amount: received,
+            amount_paid: received,
+            pending_amount: pending,
+            payment_status: paymentStatus,
+            payment_method: paymentMethod,
+            is_active: pending === 0,
+            currency: 'INR',
+            gym_id: profile?.gym_id,
+            created_by: profile?.id,
+            payment_notes: paymentNotes || null,
+            last_payment_date: received > 0 ? new Date().toISOString() : null,
+          }])
+          .select()
+          .single();
+
+        if (subError) throw subError;
+
+        if (received > 0) {
+          const receiptNum = receiptNumber || `REC-${Date.now()}`;
+
+          const { data: payment, error: paymentError } = await supabase
+            .from('cash_payments')
+            .insert([{
+              user_id: userId,
+              gym_id: profile?.gym_id,
+              amount: received,
+              currency: 'INR',
+              receipt_number: receiptNum,
+              payment_date: new Date().toISOString(),
+              received_by: profile?.id,
+              notes: paymentNotes || `Initial payment for ${selectedSubscription.name}`,
+            }])
+            .select()
+            .single();
+
+          if (paymentError) throw paymentError;
+
+          const { error: invoiceError } = await supabase.from('invoices').insert([{
+            invoice_number: `INV-${Date.now()}`,
+            user_id: userId,
+            gym_id: profile?.gym_id,
+            subscription_id: userSub.id,
+            payment_type: paymentMethod,
+            amount: selectedSubscription.price,
+            currency: 'INR',
+            tax_amount: 0,
+            total_amount: selectedSubscription.price,
+            remaining_amount: pending,
+            payment_status: paymentStatus,
+            invoice_date: new Date().toISOString(),
+            payment_id: payment.id,
+            items: JSON.stringify([{
+              description: `${selectedSubscription.name} - New Subscription`,
+              quantity: 1,
+              rate: selectedSubscription.price,
+              amount: selectedSubscription.price,
+            }]),
+          }]);
+
+          if (invoiceError) {
+            console.error('Invoice creation error:', invoiceError);
+          }
         }
-
-        // Create invoice
-        await createSubscriptionInvoice(
-          userId,
-          selectedSubscription.id,
-          received,
-          'cash',
-          paymentId,
-          profile?.gym_id
-        );
-
-        subscriptionCreated = true;
-
-        // Show success message with payment details
-        const successMsg = pending > 0
-          ? `Member added! Paid: ₹${received}, Pending: ₹${pending.toFixed(2)}`
-          : 'Member added with full payment!';
-
-        Alert.alert('Success', successMsg);
       } catch (subError) {
         console.error('Error creating subscription:', subError);
         Alert.alert('Warning', 'Member created but subscription setup failed.');
       }
     }
 
+    const addedMemberName = newMember.full_name;
+
+    // Close modal
+    setShowAddMember(false);
+
+    // Reset form
+    setNewMember({
+      full_name: '',
+      email: '',
+      phone: '',
+      password: '',
+      has_personal_training: false,
+    });
+    setSelectedSubscription(null);
+    setPaymentMethod('none');
+    setAmountReceived('');
+    setReceiptNumber('');
+    setPaymentNotes('');
+
+    // Refresh member list
+    await fetchMembers();
+
+    // Show success
+    setTimeout(() => {
+      if (Platform.OS === 'web') {
+        window.alert(`Success\n\n${addedMemberName} added successfully!`);
+      } else {
+        Alert.alert('Success', `${addedMemberName} added successfully!`);
+      }
+    }, 300);
+
+  } catch (error: any) {
+    const errorMessage = error?.message || 'Failed to add member';
+    if (errorMessage.includes('already registered')) {
+      Alert.alert('Error', 'This email is already registered');
+    } else {
+      Alert.alert('Error', errorMessage);
+    }
+  } finally {
+    setIsLoading(false);
+    setIsCreatingMember(false);
+  }
+};
+
+  const deleteMember = async (memberId: string, memberName: string) => {
+    showConfirm(
+      'Delete Member',
+      `Are you sure you want to delete ${memberName}? This will permanently delete all their data.`,
+      async () => {
+        try {
+          setIsLoading(true);
+  
+          const { error: rpcError } = await supabase.rpc('delete_user', { 
+            user_id: memberId 
+          });
+  
+          if (rpcError) {
+            console.log('RPC failed, manual delete...', rpcError);
+            
+            await supabase.from('attendance').delete().eq('user_id', memberId);
+            await supabase.from('workout_logs').delete().eq('user_id', memberId);
+            await supabase.from('diet_logs').delete().eq('user_id', memberId);
+            await supabase.from('cash_payments').delete().eq('user_id', memberId);
+            await supabase.from('invoices').delete().eq('user_id', memberId);
+            await supabase.from('user_subscriptions').delete().eq('user_id', memberId);
+            await supabase.from('personal_training_assignments').delete().eq('user_id', memberId);
+            
+            const { error: profileError } = await supabase
+              .from('profiles')
+              .delete()
+              .eq('id', memberId);
+              
+            if (profileError) throw profileError;
+          }
+  
+          setShowMemberDetails(false);
+          await fetchMembers();
+          
+          showAlert('Success', `${memberName} deleted successfully`);
+          
+        } catch (error: any) {
+          console.error('Delete error:', error);
+          showAlert('Error', error.message || 'Failed to delete member');
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    );
+  };
+
+  const payPendingAmount = async () => {
+    if (!selectedMember || !selectedMember.currentSubscription) {
+      Alert.alert('Error', 'No subscription found');
+      return;
+    }
+
+    if (!pendingPaymentAmount || parseFloat(pendingPaymentAmount) <= 0) {
+      Alert.alert('Error', 'Please enter payment amount');
+      return;
+    }
+
+    const paymentAmount = parseFloat(pendingPaymentAmount);
+    const currentPending = selectedMember.currentSubscription.pending_amount || 0;
+
+    if (paymentAmount > currentPending) {
+      Alert.alert('Error', `Payment amount cannot exceed pending amount of ${formatRupees(currentPending)}`);
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: newMember.email,
-        password: newMember.password,
-        options: {
-          data: {
-            full_name: newMember.full_name,
-            phone: newMember.phone || null,
-            role: 'member',
-            gym_id: profile?.gym_id ? String(profile.gym_id) : null,
-            has_personal_training: newMember.has_personal_training,
-          },
-        },
-      });
+      const receiptNum = pendingReceiptNumber || `REC-${Date.now()}`;
+      const newPending = currentPending - paymentAmount;
+      const newPaid = (selectedMember.currentSubscription.paid_amount || 0) + paymentAmount;
+      const newStatus = newPending === 0 ? 'completed' : 'partial';
 
-      if (authError) throw authError;
-      if (!authData.user) throw new Error('Failed to create user');
-
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      const userId = authData.user.id;
-      let subscriptionCreated = false;
-
-      if (newMember.has_personal_training) {
-        await supabase
-          .from('profiles')
-          .update({ has_personal_training: true })
-          .eq('id', userId);
-
-        if (profile?.gym_id) {
-          await supabase.from('personal_training_assignments').insert([{
-            user_id: userId,
-            gym_id: profile.gym_id,
-            assigned_by: profile.id,
-            is_active: true,
-            start_date: new Date().toISOString().split('T')[0],
-          }]);
-        }
-      }
-
-      if (paymentMethod === 'cash' && selectedSubscription) {
-        try {
-          const received = parseFloat(amountReceived);
-          const pending = calculatePendingAmount();
-          const paymentStatus = pending === 0 ? 'completed' : 'partial';
-
-          const { paymentId, userSubscriptionId } = await createSubscriptionWithCashPayment(
-            userId,
-            selectedSubscription.id,
-            received,
-            profile?.gym_id,
-            profile?.id,
-            receiptNumber || undefined
-          );
-
-          // Update subscription with pending amount and notes
-          await supabase
-            .from('user_subscriptions')
-            .update({
-              payment_status: paymentStatus,
-              pending_amount: pending,
-              payment_notes: paymentNotes || null,
-            })
-            .eq('id', userSubscriptionId);
-
-          await createSubscriptionInvoice(
-            userId,
-            selectedSubscription.id,
-            received,
-            'cash',
-            paymentId,
-            profile?.gym_id
-          );
-
-          subscriptionCreated = true;
-        } catch (subError) {
-          console.error('Error creating subscription:', subError);
-          Alert.alert('Warning', 'Member created but subscription setup failed.');
-        }
-      } else if (paymentMethod === 'online' && selectedSubscription) {
-        const startDate = new Date();
-        const endDate = new Date();
-        endDate.setDate(endDate.getDate() + selectedSubscription.duration_days);
-
-        await supabase.from('user_subscriptions').insert([{
-          user_id: userId,
-          subscription_id: selectedSubscription.id,
-          start_date: startDate.toISOString().split('T')[0],
-          end_date: endDate.toISOString().split('T')[0],
-          amount_paid: 0,
-          pending_amount: selectedSubscription.price,
-          payment_status: 'pending',
-          payment_method: 'online',
-          is_active: false,
+      // 1. Create cash payment record
+      const { data: payment, error: paymentError } = await supabase
+        .from('cash_payments')
+        .insert([{
+          user_id: selectedMember.id,
+          gym_id: profile?.gym_id,
+          amount: paymentAmount,
           currency: 'INR',
-        }]);
-      }
+          receipt_number: receiptNum,
+          payment_date: new Date().toISOString(),
+          received_by: profile?.id,
+          notes: pendingPaymentNotes || `Pending payment collection for subscription`,
+        }])
+        .select()
+        .single();
 
-      setNewMember({
-        full_name: '',
-        email: '',
-        phone: '',
-        password: '',
-        has_personal_training: false,
-      });
-      setSelectedSubscription(null);
-      setPaymentMethod('none');
-      setAmountReceived('');
-      setReceiptNumber('');
-      setPaymentNotes('');
-      setShowAddMember(false);
-      await fetchMembers();
+      if (paymentError) throw paymentError;
 
-      Alert.alert('Success', `Member ${newMember.full_name} added successfully!`);
-    } catch (error: any) {
-      const errorMessage = error?.message || 'Failed to add member';
-      if (errorMessage.includes('already registered')) {
-        Alert.alert('Error', 'This email is already registered');
+      // 2. Update user_subscriptions table (PRIMARY SOURCE OF TRUTH)
+      const { error: subError } = await supabase
+        .from('user_subscriptions')
+        .update({
+          paid_amount: newPaid,
+          amount_paid: newPaid, // Keep both fields in sync
+          pending_amount: newPending,
+          payment_status: newStatus,
+          last_payment_date: new Date().toISOString(),
+        })
+        .eq('id', selectedMember.currentSubscription.id);
+
+      if (subError) throw subError;
+
+      // 3. Sync or create invoice
+      const { data: existingInvoice } = await supabase
+        .from('invoices')
+        .select('id')
+        .eq('user_id', selectedMember.id)
+        .eq('subscription_id', selectedMember.currentSubscription.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingInvoice) {
+        // Update existing invoice
+        const { error: updateError } = await supabase
+          .from('invoices')
+          .update({
+            remaining_amount: newPending,
+            payment_status: newStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingInvoice.id);
+
+        if (updateError) {
+          console.error('Invoice update error:', updateError);
+        }
       } else {
-        Alert.alert('Error', errorMessage);
+        // Create new invoice if doesn't exist
+        const subscriptionData = selectedMember.currentSubscription;
+        const totalAmount = subscriptionData.total_amount || 0;
+
+        const { error: createError } = await supabase.from('invoices').insert([{
+          invoice_number: `INV-${Date.now()}`,
+          user_id: selectedMember.id,
+          gym_id: profile?.gym_id,
+          subscription_id: selectedMember.currentSubscription.id,
+          payment_type: 'cash',
+          amount: totalAmount,
+          currency: 'INR',
+          tax_amount: 0,
+          total_amount: totalAmount,
+          remaining_amount: newPending,
+          payment_status: newStatus,
+          invoice_date: new Date().toISOString(),
+          payment_id: payment.id,
+          items: JSON.stringify([{
+            description: `${subscriptionData.subscription?.name || 'Subscription'} - Payment Collection`,
+            quantity: 1,
+            rate: totalAmount,
+            amount: totalAmount,
+          }]),
+        }]);
+
+        if (createError) {
+          console.error('Invoice creation error:', createError);
+        }
       }
+
+      // Reset form
+      setPendingPaymentAmount('');
+      setPendingReceiptNumber('');
+      setPendingPaymentNotes('');
+      setShowPayPendingModal(false);
+
+      // Refresh data
+      await fetchMembers();
+      await fetchMemberDetails(selectedMember.id);
+
+      Alert.alert(
+        'Success',
+        newPending === 0
+          ? 'Payment completed! No pending amount remaining.'
+          : `Payment received! Remaining: ${formatRupees(newPending)}`
+      );
+    } catch (error: any) {
+      console.error('Error processing payment:', error);
+      Alert.alert('Error', error.message || 'Failed to process payment');
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const deleteMember = async (memberId: string, memberName: string) => {
-    Alert.alert(
-      'Delete Member',
-      `Are you sure you want to delete ${memberName}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase.rpc('delete_user', { user_id: memberId });
-
-              if (error) {
-                const { error: profileError } = await supabase
-                  .from('profiles')
-                  .delete()
-                  .eq('id', memberId);
-                if (profileError) throw profileError;
-              }
-
-              setShowMemberDetails(false);
-              await fetchMembers();
-              Alert.alert('Success', 'Member deleted successfully');
-            } catch (error: any) {
-              Alert.alert('Error', error.message || 'Failed to delete member');
-            }
-          },
-        },
-      ]
-    );
   };
 
   const renewMemberSubscription = async () => {
@@ -673,54 +870,48 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       return;
     }
 
+    // Check for pending amount on current subscription
     if (selectedMember.currentSubscription && selectedMember.currentSubscription.pending_amount > 0) {
       Alert.alert(
         'Pending Payment',
-        `This member has a pending amount of ₹${selectedMember.currentSubscription.pending_amount.toFixed(2)} on their current subscription. Please clear this before renewing.`,
+        `This member has a pending amount of ${formatRupees(selectedMember.currentSubscription.pending_amount)} on their current subscription. Please clear this before renewing.`,
         [
           { text: 'OK', style: 'cancel' },
           {
             text: 'Pay Now',
             onPress: () => {
-              // Close renewal modal and show payment option
               setShowRenewModal(false);
-              Alert.alert('Info', 'Please collect the pending payment first, then proceed with renewal.');
+              setTimeout(() => {
+                setShowPayPendingModal(true);
+              }, 300);
             }
           }
         ]
       );
       return;
     }
-  
-    if (renewPaymentMethod === 'cash') {
-      if (!renewAmountReceived || parseFloat(renewAmountReceived) <= 0) {
-        Alert.alert('Error', 'Please enter amount received');
-        return;
-      }
-  
-      const received = parseFloat(renewAmountReceived);
-      const planPrice = renewSubscription.price;
-  
-      if (received > planPrice) {
-        Alert.alert('Error', 'Amount received cannot exceed plan price');
-        return;
-      }
+
+    if (!renewAmountReceived || parseFloat(renewAmountReceived) <= 0) {
+      Alert.alert('Error', 'Please enter amount received');
+      return;
     }
-  
+
+    const received = parseFloat(renewAmountReceived);
+    if (received > renewSubscription.price) {
+      Alert.alert('Error', 'Amount received cannot exceed plan price');
+      return;
+    }
+
     setIsLoading(true);
-  
+
     try {
-      // Calculate new dates
       const startDate = new Date();
       const endDate = new Date();
       endDate.setDate(endDate.getDate() + (renewSubscription.duration_days || renewSubscription.duration_months * 30));
-  
-      const received = renewPaymentMethod === 'cash' ? parseFloat(renewAmountReceived) : 0;
-      const pending = renewPaymentMethod === 'cash' ? Math.max(0, renewSubscription.price - received) : renewSubscription.price;
-      const paymentStatus = renewPaymentMethod === 'cash' 
-        ? (pending === 0 ? 'completed' : 'partial')
-        : 'pending';
-  
+
+      const pending = Math.max(0, renewSubscription.price - received);
+      const paymentStatus = pending === 0 ? 'completed' : 'partial';
+
       // Create new subscription
       const { data: newSubscription, error: subError } = await supabase
         .from('user_subscriptions')
@@ -729,27 +920,28 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
           subscription_id: renewSubscription.id,
           start_date: startDate.toISOString().split('T')[0],
           end_date: endDate.toISOString().split('T')[0],
-          amount_paid: received,
-          pending_amount: pending,
           total_amount: renewSubscription.price,
+          paid_amount: received,
+          amount_paid: received, // Keep both in sync
+          pending_amount: pending,
           payment_status: paymentStatus,
           payment_method: renewPaymentMethod,
-          is_active: renewPaymentMethod === 'cash' && pending === 0,
+          is_active: pending === 0, // Only active if fully paid
           currency: 'INR',
           gym_id: profile?.gym_id,
           created_by: profile?.id,
           payment_notes: renewPaymentNotes || null,
+          last_payment_date: received > 0 ? new Date().toISOString() : null,
         }])
         .select()
         .single();
-  
+
       if (subError) throw subError;
-  
-      // If cash payment, create payment record and invoice
-      if (renewPaymentMethod === 'cash' && received > 0) {
+
+      // Create payment record if amount received
+      if (received > 0) {
         const receiptNum = renewReceiptNumber || `REC-${Date.now()}`;
-  
-        // Create cash payment record
+
         const { data: payment, error: paymentError } = await supabase
           .from('cash_payments')
           .insert([{
@@ -764,37 +956,38 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
           }])
           .select()
           .single();
-  
+
         if (paymentError) throw paymentError;
-  
-        // Create invoice
-        const { error: invoiceError } = await supabase
-          .from('invoices')
-          .insert([{
-            invoice_number: `INV-${Date.now()}`,
-            user_id: selectedMember.id,
-            gym_id: profile?.gym_id,
-            subscription_id: newSubscription.id,
-            payment_type: 'cash',
+
+        // Create invoice with error handling
+        const { error: invoiceError } = await supabase.from('invoices').insert([{
+          invoice_number: `INV-${Date.now()}`,
+          user_id: selectedMember.id,
+          gym_id: profile?.gym_id,
+          subscription_id: newSubscription.id,
+          payment_type: renewPaymentMethod,
+          amount: renewSubscription.price,
+          currency: 'INR',
+          tax_amount: 0,
+          total_amount: renewSubscription.price,
+          remaining_amount: pending,
+          payment_status: paymentStatus,
+          invoice_date: new Date().toISOString(),
+          payment_id: payment.id,
+          items: JSON.stringify([{
+            description: `${renewSubscription.name} - Renewal`,
+            quantity: 1,
+            rate: renewSubscription.price,
             amount: renewSubscription.price,
-            currency: 'INR',
-            tax_amount: 0,
-            total_amount: renewSubscription.price,
-            remaining_amount: pending,
-            payment_status: paymentStatus,
-            invoice_date: new Date().toISOString(),
-            payment_id: payment.id,
-            items: JSON.stringify([{
-              description: `${renewSubscription.name} - Renewal`,
-              quantity: 1,
-              rate: renewSubscription.price,
-              amount: renewSubscription.price,
-            }]),
-          }]);
-  
-        if (invoiceError) throw invoiceError;
+          }]),
+        }]);
+
+        if (invoiceError) {
+          console.error('Invoice creation error:', invoiceError);
+          // Continue anyway - invoice is optional
+        }
       }
-  
+
       // Deactivate old subscription
       if (selectedMember.currentSubscription) {
         await supabase
@@ -802,7 +995,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
           .update({ is_active: false })
           .eq('id', selectedMember.currentSubscription.id);
       }
-  
+
       // Reset form
       setRenewSubscription(null);
       setRenewAmountReceived('');
@@ -810,16 +1003,15 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       setRenewReceiptNumber('');
       setRenewPaymentNotes('');
       setShowRenewModal(false);
-  
+
       // Refresh data
       await fetchMembers();
       await fetchMemberDetails(selectedMember.id);
-  
-      const message = renewPaymentMethod === 'cash'
-        ? `Subscription renewed! Paid: ₹${received}, Pending: ₹${pending.toFixed(2)}`
-        : 'Subscription created! Payment pending.';
-  
-      Alert.alert('Success', message);
+
+      Alert.alert(
+        'Success',
+        `Subscription renewed! Paid: ${formatRupees(received)}, Pending: ${formatRupees(pending)}`
+      );
     } catch (error: any) {
       console.error('Error renewing subscription:', error);
       Alert.alert('Error', error.message || 'Failed to renew subscription');
@@ -843,7 +1035,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       paddingHorizontal: 20,
       paddingTop: Platform.OS === 'ios' ? 8 : 16,
       paddingBottom: 20,
-      backgroundColor: COLORS.cardBg,
+      backgroundColor: theme.colors.card,
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
     },
@@ -862,10 +1054,22 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       paddingHorizontal: 20,
       paddingVertical: 16,
     },
+    passwordContainer: {
+      position: 'relative',
+    },
+    passwordInput: {
+      paddingRight: 50,
+    },
+    eyeIcon: {
+      position: 'absolute',
+      right: 12,
+      top: 12,
+      padding: 8,
+    },
     searchInputContainer: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: COLORS.cardBg,
+      backgroundColor: theme.colors.card,
       borderRadius: 12,
       paddingHorizontal: 16,
       paddingVertical: 12,
@@ -965,20 +1169,8 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       fontSize: 12,
       color: theme.colors.warning,
     },
-    viewButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: theme.colors.primaryLight,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 8,
-      gap: 4,
-    },
-    viewButtonText: {
-      fontSize: 12,
-      color: theme.colors.primary,
-      fontWeight: '600',
-    },
+    
+    
     fab: {
       position: 'absolute',
       bottom: 24 + 70,
@@ -997,7 +1189,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
     },
     modalSafeArea: {
       flex: 1,
-      backgroundColor: COLORS.cardBg,
+      backgroundColor: theme.colors.card,
     },
     modalContainer: {
       flex: 1,
@@ -1044,7 +1236,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       paddingHorizontal: 16,
       paddingVertical: 14,
       fontSize: 16,
-      backgroundColor: COLORS.cardBg,
+      backgroundColor: theme.colors.card,
       color: theme.colors.text,
       minHeight: 52,
     },
@@ -1138,7 +1330,6 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
     toggleThumbActive: {
       alignSelf: 'flex-end',
     },
-
     overviewPoints: {
       fontSize: 14,
       color: theme.colors.textSecondary,
@@ -1175,7 +1366,6 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       marginBottom: 24,
       padding: 20,
     },
-
     memberAvatarLarge: {
       width: 64,
       height: 64,
@@ -1184,12 +1374,9 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       alignItems: 'center',
       justifyContent: 'center',
     },
-
-
     memberStats: {
       alignItems: 'flex-end',
     },
-
     sectionTitle: {
       fontSize: 18,
       fontWeight: '700',
@@ -1211,6 +1398,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
     },
     subscriptionOptionSelected: {
       borderColor: theme.colors.primary,
+      backgroundColor: theme.colors.primary + '15',
     },
     subscriptionName: {
       fontSize: 14,
@@ -1267,10 +1455,9 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       color: theme.colors.textSecondary,
     },
     paymentMethodTextSelected: {
-      color: COLORS.cardBg,
+      color: '#FFFFFF',
     },
     paymentSummary: {
-      // backgroundColor: theme.colors.primaryLight,
       borderRadius: 12,
       padding: 16,
       marginTop: 16,
@@ -1308,7 +1495,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
     paymentSummaryTotalValue: {
       fontSize: 20,
       fontWeight: '700',
-      color: theme.colors.primaryDark,
+      color: theme.colors.primary,
     },
     paymentStatusBadge: {
       flexDirection: 'row',
@@ -1397,12 +1584,11 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
     deleteButtonText: {
       color: theme.colors.error,
     },
-
     paymentStatusBadgeComplete: {
-      backgroundColor: COLORS.successLight,
+      backgroundColor: theme.colors.success + '20',
     },
     paymentStatusBadgePartial: {
-      backgroundColor: COLORS.warningLight,
+      backgroundColor: theme.colors.warning + '20',
     },
     paymentStatusText: {
       fontSize: 12,
@@ -1416,15 +1602,15 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
     },
     addButton: {
       marginTop: 8,
+      marginBottom:10,
       minHeight: 52,
     },
-    // Add these styles inside StyleSheet.create
     filterTabs: {
       flexDirection: 'row',
       paddingHorizontal: 20,
       paddingVertical: 12,
       gap: 8,
-      backgroundColor: COLORS.cardBg,
+      backgroundColor: theme.colors.card,
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
     },
@@ -1448,7 +1634,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       color: theme.colors.textSecondary,
     },
     filterTabTextActive: {
-      color: COLORS.cardBg,
+      color: '#FFFFFF',
     },
     activeBadge: {
       flexDirection: 'row',
@@ -1457,7 +1643,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       paddingHorizontal: 8,
       paddingVertical: 3,
       borderRadius: 6,
-      backgroundColor: COLORS.successLight,
+      backgroundColor: theme.colors.success + '20',
     },
     activeBadgeText: {
       fontSize: 11,
@@ -1471,7 +1657,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       paddingHorizontal: 8,
       paddingVertical: 3,
       borderRadius: 6,
-      backgroundColor: COLORS.errorLight,
+      backgroundColor: theme.colors.error + '20',
     },
     expiredBadgeText: {
       fontSize: 11,
@@ -1480,7 +1666,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
     },
     subscriptionDetails: {
       marginTop: 8,
-      padding: 10,
+      padding: 12,
       backgroundColor: theme.colors.background,
       borderRadius: 8,
       borderLeftWidth: 3,
@@ -1522,7 +1708,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       paddingHorizontal: 6,
       paddingVertical: 2,
       borderRadius: 4,
-      backgroundColor: COLORS.successLight,
+      backgroundColor: theme.colors.success + '20',
     },
     paidBadgeText: {
       fontSize: 10,
@@ -1533,7 +1719,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       paddingHorizontal: 6,
       paddingVertical: 2,
       borderRadius: 4,
-      backgroundColor: COLORS.warningLight,
+      backgroundColor: theme.colors.warning + '20',
     },
     partialBadgeText: {
       fontSize: 10,
@@ -1578,6 +1764,277 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
       minWidth: 35,
       textAlign: 'right',
     },
+    calendarGrid: {
+      marginTop: 16,
+    },
+
+
+    attendanceCheckMark: {
+      position: 'absolute',
+      top: 2,
+      right: 2,
+    },
+
+    attendanceHeaderContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+
+    // Overall Stats Card
+    attendanceStatsCard: {
+      marginBottom: 20,
+      padding: 20,
+      borderRadius: 16,
+    },
+    attendanceStatsHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 20,
+    },
+    memberAvatarSmall: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: theme.colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    attendanceStatsName: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    attendanceStatsSubtext: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+
+    attendanceOverallStats: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    attendanceStatBox: {
+      flex: 1,
+      alignItems: 'center',
+      padding: 16,
+      backgroundColor: theme.colors.background,
+      borderRadius: 12,
+    },
+    attendanceStatIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 12,
+    },
+    attendanceStatValue: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: theme.colors.text,
+      marginBottom: 4,
+    },
+    attendanceStatLabel: {
+      fontSize: 11,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      fontWeight: '600',
+    },
+
+    // Month Card
+    monthCard: {
+      marginBottom: 16,
+      padding: 16,
+      borderRadius: 16,
+    },
+    monthHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+      paddingBottom: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    monthTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    monthSubtitle: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+    },
+    monthStatsChip: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      backgroundColor: theme.colors.primary + '20',
+      borderRadius: 20,
+    },
+    monthStatsChipText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: theme.colors.primary,
+    },
+
+    // Month Stats Row
+    monthStatsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      marginBottom: 20,
+      paddingVertical: 12,
+      backgroundColor: theme.colors.background,
+      borderRadius: 12,
+    },
+    monthStatItem: {
+      alignItems: 'center',
+    },
+    monthStatValue: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    monthStatLabel: {
+      fontSize: 11,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+      fontWeight: '600',
+    },
+
+    // Calendar Container (Responsive)
+    calendarContainer: {
+      marginBottom: 16,
+    },
+    calendarWeekRow: {
+      flexDirection: 'row',
+      marginBottom: 8,
+    },
+    calendarHeaderCell: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: 8,
+    },
+    calendarHeaderText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: theme.colors.textSecondary,
+    },
+
+    // Calendar Days Grid (Responsive)
+    calendarDaysGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 4, // Space between cells
+    },
+    calendarDayCell: {
+      width: '13.14%', // (100% - gaps) / 7 days - adjusted for gaps
+      aspectRatio: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 8,
+      backgroundColor: theme.colors.background,
+      position: 'relative',
+    },
+    calendarDayCellAttended: {
+      backgroundColor: theme.colors.success + '15',
+      borderColor: theme.colors.success,
+      borderWidth: 1.5,
+    },
+    calendarDayCellToday: {
+      borderColor: theme.colors.primary,
+      borderWidth: 2,
+      backgroundColor: theme.colors.primary + '10',
+    },
+    calendarDayText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    calendarDayTextAttended: {
+      color: theme.colors.success,
+      fontWeight: '700',
+    },
+    calendarDayTextToday: {
+      color: theme.colors.primary,
+      fontWeight: '800',
+    },
+
+    // Attendance Indicator
+    attendanceIndicator: {
+      position: 'absolute',
+      top: 2,
+      right: 2,
+    },
+    checkInBadge: {
+      position: 'absolute',
+      bottom: 2,
+      right: 2,
+      minWidth: 16,
+      height: 16,
+      borderRadius: 8,
+      backgroundColor: theme.colors.error,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 4,
+    },
+    checkInBadgeText: {
+      fontSize: 9,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+
+    // Legend
+    legendContainer: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 20,
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+    legendItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    legendDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+    },
+    legendText: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      fontWeight: '600',
+    },
+
+    // Empty State
+    emptyStateCard: {
+      alignItems: 'center',
+      paddingVertical: 60,
+      paddingHorizontal: 40,
+    },
+    emptyStateTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginTop: 20,
+      marginBottom: 8,
+    },
+    emptyStateText: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      lineHeight: 20,
+    },
+
   });
 
   return (
@@ -1590,8 +2047,8 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={COLORS.primary}
-              colors={[COLORS.primary]}
+              tintColor={theme.colors.primary}
+              colors={[theme.colors.primary]}
             />
           }
         >
@@ -1601,19 +2058,20 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
               Manage your gym members ({members.length} total)
             </Text>
           </View>
+
           <View style={styles.searchContainer}>
             <View style={styles.searchInputContainer}>
-              <Search size={20} color={COLORS.textSecondary} />
+              <Search size={20} color={theme.colors.textSecondary} />
               <TextInput
                 style={styles.searchInput}
                 placeholder="Search by name, email, or phone..."
-                placeholderTextColor={COLORS.textSecondary}
+                placeholderTextColor={theme.colors.textSecondary}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
               />
               {searchQuery.length > 0 && (
                 <TouchableOpacity onPress={() => setSearchQuery('')} activeOpacity={0.7}>
-                  <X size={20} color={COLORS.textSecondary} />
+                  <X size={20} color={theme.colors.textSecondary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -1651,11 +2109,9 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
             </TouchableOpacity>
           </View>
 
-
-
           {filteredMembers.length === 0 ? (
             <Card style={styles.noMembersCard}>
-              <User size={48} color={COLORS.textSecondary} />
+              <User size={48} color={theme.colors.textSecondary} />
               <Text style={styles.noMembersText}>
                 {searchQuery ? 'No members found' : 'No members yet'}
               </Text>
@@ -1665,6 +2121,11 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
             </Card>
           ) : (
             filteredMembers.map((member) => (
+              <TouchableOpacity
+              style={styles.viewButton}
+              onPress={() => fetchMemberDetails(member.id)}
+              activeOpacity={0.7}
+            >
               <Card key={member.id} style={styles.memberCard}>
                 <View style={styles.memberInfo}>
                   <View style={styles.memberAvatar}>
@@ -1675,31 +2136,28 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                       <Text style={styles.memberName}>{member.full_name}</Text>
                       {member.subscriptionStatus === 'active' && (
                         <View style={styles.activeBadge}>
-                          <CheckCircle size={12} color={COLORS.success} />
+                          <CheckCircle size={12} color={theme.colors.success} />
                           <Text style={styles.activeBadgeText}>Active</Text>
                         </View>
                       )}
                       {member.subscriptionStatus === 'expired' && (
                         <View style={styles.expiredBadge}>
-                          <AlertCircle size={12} color={COLORS.error} />
+                          <AlertCircle size={12} color={theme.colors.error} />
                           <Text style={styles.expiredBadgeText}>Expired</Text>
+                        </View>
+                      )}
+                      {member.subscriptionStatus === 'none' && (
+                        <View style={[styles.expiredBadge, { backgroundColor: theme.colors.warning + '20' }]}>
+                          <AlertCircle size={12} color={theme.colors.warning} />
+                          <Text style={[styles.expiredBadgeText, { color: theme.colors.warning }]}>No Plan</Text>
                         </View>
                       )}
                     </View>
 
-                    <View style={styles.memberContact}>
-                      <Mail size={14} color={COLORS.textSecondary} />
-                      <Text style={styles.memberEmail} numberOfLines={1}>{member.email}</Text>
-                    </View>
+                   
 
-                    {member.phone && (
-                      <View style={styles.memberContact}>
-                        <Phone size={14} color={COLORS.textSecondary} />
-                        <Text style={styles.memberPhone}>{member.phone}</Text>
-                      </View>
-                    )}
+                   
 
-                    {/* Subscription Details */}
                     {member.currentSubscription && (
                       <View style={styles.subscriptionDetails}>
                         <Text style={styles.subscriptionPlanName}>
@@ -1714,12 +2172,11 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                           </Text>
                         </View>
 
-                        {/* Payment Status */}
                         <View style={styles.paymentInfo}>
                           <Text style={styles.paymentLabel}>
-                            Paid: {formatRupees(member.currentSubscription.paid_amount || member.currentSubscription.amount_paid || 0)}
+                            Paid: {formatRupees(member.currentSubscription.paid_amount || 0)}
                           </Text>
-                          {(member.currentSubscription.pending_amount || 0) >= 0 && (
+                          {(member.currentSubscription.pending_amount || 0) > 0 && (
                             <Text style={styles.pendingAmount}>
                               Pending: {formatRupees(member.currentSubscription.pending_amount)}
                             </Text>
@@ -1738,50 +2195,16 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                       </View>
                     )}
 
-                    {/* Check-in Stats */}
-                    <View style={styles.checkInStats}>
-                      <View style={styles.checkInItem}>
-                        <Activity size={14} color={COLORS.primary} />
-                        <Text style={styles.checkInText}>
-                          Check-ins: {member.totalCheckIns}/{member.expectedCheckIns}
-                        </Text>
-                      </View>
-                      <View style={styles.checkInProgress}>
-                        <View style={styles.progressBar}>
-                          <View
-                            style={[
-                              styles.progressFill,
-                              { width: `${Math.min((member.totalCheckIns / member.expectedCheckIns) * 100, 100)}%` }
-                            ]}
-                          />
-                        </View>
-                        <Text style={styles.progressText}>
-                          {Math.round((member.totalCheckIns / member.expectedCheckIns) * 100)}%
-                        </Text>
-                      </View>
-                    </View>
+                    
 
-                    <View style={styles.memberStatsRow}>
-                      <View style={styles.statItem}>
-                        <Flame size={12} color={COLORS.error} />
-                        <Text style={styles.statText}>{member.stats?.totalCaloriesBurned || 0} cal</Text>
-                      </View>
-                      <View style={styles.statItem}>
-                        <Text style={styles.memberLevel}>Lv {member.level}</Text>
-                        <Text style={styles.memberStreak}>{member.current_streak}🔥</Text>
-                      </View>
-                    </View>
+                    
                   </View>
 
-                  <TouchableOpacity
-                    style={styles.viewButton}
-                    onPress={() => fetchMemberDetails(member.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Eye size={16} color={COLORS.cardBg} />
-                  </TouchableOpacity>
+                 
+                  
                 </View>
               </Card>
+              </TouchableOpacity>
             ))
           )}
         </ScrollView>
@@ -1790,24 +2213,34 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
           <Plus size={24} color="#FFFFFF" />
         </TouchableOpacity>
 
-        {/* Add Member Modal */}
-        <Modal visible={showAddMember} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowAddMember(false)}>
+        <Modal
+          visible={showAddMember}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowAddMember(false)}
+        >
           <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
             <View style={styles.modalContainer}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Add New Member</Text>
-                <TouchableOpacity onPress={() => setShowAddMember(false)} style={styles.closeButton} activeOpacity={0.7}>
-                  <X size={24} color={COLORS.text} />
+                <TouchableOpacity onPress={() => setShowAddMember(false)} style={styles.closeButton}>
+                  <X size={24} color={theme.colors.text} />
                 </TouchableOpacity>
               </View>
 
-              <ScrollView style={styles.modalScrollView} contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <ScrollView
+                style={styles.modalScrollView}
+                contentContainerStyle={styles.modalContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {/* Personal Information */}
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>Full Name *</Text>
                   <TextInput
                     style={styles.input}
                     placeholder="Enter full name"
-                    placeholderTextColor={COLORS.textSecondary}
+                    placeholderTextColor={theme.colors.textSecondary}
                     value={newMember.full_name}
                     onChangeText={(text) => setNewMember({ ...newMember, full_name: text })}
                   />
@@ -1818,7 +2251,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                   <TextInput
                     style={styles.input}
                     placeholder="Enter email address"
-                    placeholderTextColor={COLORS.textSecondary}
+                    placeholderTextColor={theme.colors.textSecondary}
                     value={newMember.email}
                     onChangeText={(text) => setNewMember({ ...newMember, email: text })}
                     keyboardType="email-address"
@@ -1827,34 +2260,48 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Phone</Text>
+                  <Text style={styles.inputLabel}>Phone *</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="Enter phone number (optional)"
-                    placeholderTextColor={COLORS.textSecondary}
+                    placeholder="Enter phone number "
+                    placeholderTextColor={theme.colors.textSecondary}
                     value={newMember.phone}
                     onChangeText={(text) => setNewMember({ ...newMember, phone: text })}
                     keyboardType="phone-pad"
+
                   />
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Password *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Min 6 characters"
-                    placeholderTextColor={COLORS.textSecondary}
-                    value={newMember.password}
-                    onChangeText={(text) => setNewMember({ ...newMember, password: text })}
-                    secureTextEntry
-                  />
-                  <Text style={styles.helperText}>
-                    Member will use this email and password to login.
-                  </Text>
-                </View>
+  <Text style={styles.inputLabel}>Password *</Text>
+  <View style={styles.passwordContainer}>
+    <TextInput
+      style={[styles.input, styles.passwordInput]}
+      placeholder="Min 6 characters"
+      placeholderTextColor={theme.colors.textSecondary}
+      value={newMember.password}
+      onChangeText={(text) => setNewMember({ ...newMember, password: text })}
+      secureTextEntry={!showPassword}
+    />
+    <TouchableOpacity
+      style={styles.eyeIcon}
+      onPress={() => setShowPassword(!showPassword)}
+    >
+      <Ionicons
+        name={showPassword ? "eye-off-outline" : "eye-outline"}
+        size={24}
+        color={theme.colors.textSecondary}
+      />
+    </TouchableOpacity>
+  </View>
+  <Text style={styles.helperText}>
+    Member will use this email and password to login.
+  </Text>
+</View>
 
                 <View style={styles.sectionDivider} />
 
+                {/* Subscription Section */}
                 <Text style={styles.sectionTitle}>Subscription (Optional)</Text>
                 <Text style={styles.helperText}>
                   Add a subscription plan with payment details or skip for later.
@@ -1918,7 +2365,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                             onPress={() => setPaymentMethod('cash')}
                             activeOpacity={0.7}
                           >
-                            <DollarSign size={20} color={paymentMethod === 'cash' ? COLORS.cardBg : theme.colors.textSecondary} />
+                            <DollarSign size={20} color={paymentMethod === 'cash' ? '#FFFFFF' : theme.colors.textSecondary} />
                             <Text style={[
                               styles.paymentMethodText,
                               paymentMethod === 'cash' && styles.paymentMethodTextSelected,
@@ -1935,7 +2382,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                             onPress={() => setPaymentMethod('online')}
                             activeOpacity={0.7}
                           >
-                            <CreditCard size={20} color={paymentMethod === 'online' ? COLORS.cardBg : theme.colors.textSecondary} />
+                            <CreditCard size={20} color={paymentMethod === 'online' ? '#FFFFFF' : theme.colors.textSecondary} />
                             <Text style={[
                               styles.paymentMethodText,
                               paymentMethod === 'online' && styles.paymentMethodTextSelected,
@@ -1964,7 +2411,8 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                           </TouchableOpacity>
                         </View>
 
-                        {paymentMethod === 'cash' && (
+                        {/* Cash & Online Payment Fields (Same for Both) */}
+                        {(paymentMethod === 'cash' || paymentMethod === 'online') && (
                           <>
                             <View style={styles.inputGroup}>
                               <Text style={styles.inputLabel}>Plan Amount</Text>
@@ -1980,7 +2428,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                               <TextInput
                                 style={styles.input}
                                 placeholder="Enter amount received"
-                                placeholderTextColor={COLORS.textSecondary}
+                                placeholderTextColor={theme.colors.textSecondary}
                                 value={amountReceived}
                                 onChangeText={setAmountReceived}
                                 keyboardType="decimal-pad"
@@ -1991,7 +2439,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                             </View>
 
                             <View style={styles.inputGroup}>
-                              <Text style={styles.inputLabel}>Pending Amount </Text>
+                              <Text style={styles.inputLabel}>Pending Amount</Text>
                               <TextInput
                                 style={[styles.input, styles.inputReadonly]}
                                 value={`₹${calculatePendingAmount()}`}
@@ -2025,14 +2473,14 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                                   ]}>
                                     {calculatePendingAmount() === 0 ? (
                                       <>
-                                        <CheckCircle size={14} color={COLORS.success} />
+                                        <CheckCircle size={14} color={theme.colors.success} />
                                         <Text style={[styles.paymentStatusText, styles.paymentStatusTextComplete]}>
                                           Fully Paid
                                         </Text>
                                       </>
                                     ) : (
                                       <>
-                                        <AlertCircle size={14} color={COLORS.warning} />
+                                        <AlertCircle size={14} color={theme.colors.warning} />
                                         <Text style={[styles.paymentStatusText, styles.paymentStatusTextPartial]}>
                                           Partial Payment
                                         </Text>
@@ -2048,7 +2496,7 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                               <TextInput
                                 style={styles.input}
                                 placeholder="Auto-generated if left blank"
-                                placeholderTextColor={COLORS.textSecondary}
+                                placeholderTextColor={theme.colors.textSecondary}
                                 value={receiptNumber}
                                 onChangeText={setReceiptNumber}
                               />
@@ -2059,20 +2507,20 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                               <TextInput
                                 style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
                                 placeholder="Add any notes about this payment..."
-                                placeholderTextColor={COLORS.textSecondary}
+                                placeholderTextColor={theme.colors.textSecondary}
                                 value={paymentNotes}
                                 onChangeText={setPaymentNotes}
                                 multiline
                                 numberOfLines={3}
                               />
                             </View>
-                          </>
-                        )}
 
-                        {paymentMethod === 'online' && (
-                          <Text style={styles.helperText}>
-                            Member will complete online payment through the app after registration. Subscription will be activated once payment is completed.
-                          </Text>
+                            {paymentMethod === 'online' && (
+                              <Text style={styles.helperText}>
+                                💡 Member paid online. Amount will be recorded for tracking.
+                              </Text>
+                            )}
+                          </>
                         )}
                       </>
                     )}
@@ -2094,597 +2542,54 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
           </SafeAreaView>
         </Modal>
 
-        {/* Member Details Modal - Simplified for space */}
+        {/* ==================== PAY PENDING MODAL ==================== */}
         <Modal
-          visible={showMemberDetails}
+          visible={showPayPendingModal}
           animationType="slide"
           presentationStyle="pageSheet"
-          onRequestClose={() => setShowMemberDetails(false)}
+          onRequestClose={() => setShowPayPendingModal(false)}
         >
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{selectedMember?.full_name}</Text>
-              <TouchableOpacity onPress={() => setShowMemberDetails(false)}>
-                <X size={24} color={theme.colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              style={styles.modalContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {selectedMember && (
-                <>
-                  {/* Member Overview */}
-                  <Card style={styles.overviewCard}>
-                    <View style={styles.overviewHeader}>
-                      <View style={styles.memberAvatarLarge}>
-                        <User size={32} color="#ffffff" />
-                      </View>
-                      <View style={styles.overviewInfo}>
-                        <Text style={styles.overviewName}>
-                          {selectedMember.full_name}
-                        </Text>
-                        <Text style={styles.overviewEmail}>
-                          {selectedMember.email}
-                        </Text>
-                        {selectedMember.phone && (
-                          <Text style={styles.overviewPhone}>
-                            {selectedMember.phone}
-                          </Text>
-                        )}
-                        <View style={styles.overviewStats}>
-                          <Text style={styles.overviewLevel}>
-                            Level {selectedMember.level}
-                          </Text>
-                          <Text style={styles.overviewPoints}>
-                            {selectedMember.total_points} XP
-                          </Text>
-                          <Text style={styles.overviewStreak}>
-                            {selectedMember.current_streak} day streak
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  </Card>
-
-                  {/* Personal Training Toggle */}
-                  <Card style={styles.overviewCard}>
-                    <View style={styles.toggleContainer}>
-                      <Text style={styles.toggleLabel}>Personal Training</Text>
-                      <TouchableOpacity
-                        style={[
-                          styles.toggleSwitch,
-                          selectedMember.has_personal_training && styles.toggleSwitchActive,
-                        ]}
-                        onPress={async () => {
-                          try {
-                            const newValue = !selectedMember.has_personal_training;
-                            const { error } = await supabase
-                              .from('profiles')
-                              .update({ has_personal_training: newValue })
-                              .eq('id', selectedMember.id);
-
-                            if (error) throw error;
-
-                            // Update personal training assignment
-                            if (newValue) {
-                              // Create assignment if doesn't exist
-                              const { data: existing } = await supabase
-                                .from('personal_training_assignments')
-                                .select('id')
-                                .eq('user_id', selectedMember.id)
-                                .single();
-
-                              if (!existing && profile?.gym_id) {
-                                await supabase.from('personal_training_assignments').insert([
-                                  {
-                                    user_id: selectedMember.id,
-                                    gym_id: profile.gym_id,
-                                    assigned_by: profile.id,
-                                    is_active: true,
-                                    start_date: new Date().toISOString().split('T')[0],
-                                  },
-                                ]);
-                              }
-                            } else {
-                              // Deactivate assignment
-                              await supabase
-                                .from('personal_training_assignments')
-                                .update({ is_active: false })
-                                .eq('user_id', selectedMember.id);
-                            }
-
-                            setSelectedMember({
-                              ...selectedMember,
-                              has_personal_training: newValue,
-                            });
-                            Alert.alert('Success', `Personal training ${newValue ? 'enabled' : 'disabled'}`);
-                          } catch (error) {
-                            console.error('Error updating personal training:', error);
-                            Alert.alert('Error', 'Failed to update personal training status');
-                          }
-                        }}
-                      >
-                        <View
-                          style={[
-                            styles.toggleThumb,
-                            selectedMember.has_personal_training && styles.toggleThumbActive,
-                          ]}
-                        />
-                      </TouchableOpacity>
-                    </View>
-                    <Text style={styles.helperText}>
-                      {selectedMember.has_personal_training
-                        ? 'Member has access to personal training diet plans'
-                        : 'Enable to provide custom diet plans for this member'}
-                    </Text>
-                  </Card>
-
-                  {/* Current Subscription Info */}
-<Card style={styles.overviewCard}>
-  <Text style={styles.sectionTitle}>Subscription Details</Text>
-  
-  {selectedMember.currentSubscription ? (
-    <>
-      <View style={{ gap: 12 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={styles.inputLabel}>Plan Name:</Text>
-          <Text style={styles.overviewName}>
-            {selectedMember.currentSubscription.subscription?.name || 'N/A'}
-          </Text>
-        </View>
-
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-  <Text style={styles.memberName}>{members.full_name}</Text>
-  {members.subscriptionStatus === 'active' && members.currentSubscription && (
-    <View style={styles.activeBadge}>
-      <CheckCircle size={12} color={COLORS.success} />
-      <Text style={styles.activeBadgeText}>Active</Text>
-    </View>
-  )}
-  {members.subscriptionStatus === 'expired' && members.currentSubscription && (
-    <View style={styles.expiredBadge}>
-      <AlertCircle size={12} color={COLORS.error} />
-      <Text style={styles.expiredBadgeText}>Expired</Text>
-    </View>
-  )}
-  {members.subscriptionStatus === 'none' && (
-    <View style={[styles.expiredBadge, { backgroundColor: COLORS.warningLight }]}>
-      <AlertCircle size={12} color={COLORS.warning} />
-      <Text style={[styles.expiredBadgeText, { color: COLORS.warning }]}>No Plan</Text>
-    </View>
-  )}
-</View>
-
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={styles.inputLabel}>Start Date:</Text>
-          <Text style={styles.subscriptionDate}>
-            {new Date(selectedMember.currentSubscription.start_date).toLocaleDateString()}
-          </Text>
-        </View>
-
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={styles.inputLabel}>End Date:</Text>
-          <Text style={styles.subscriptionDate}>
-            {new Date(selectedMember.currentSubscription.end_date).toLocaleDateString()}
-          </Text>
-        </View>
-
-        <View style={{ 
-          flexDirection: 'row', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          paddingVertical: 12,
-          paddingHorizontal: 16,
-          backgroundColor: selectedMember.subscriptionStatus === 'active' 
-            ? COLORS.successLight 
-            : COLORS.errorLight,
-          borderRadius: 8,
-        }}>
-          <Text style={[styles.inputLabel, { 
-            color: selectedMember.subscriptionStatus === 'active' 
-              ? COLORS.success 
-              : COLORS.error,
-            fontWeight: '700',
-          }]}>
-            {selectedMember.subscriptionStatus === 'active' ? 'Days Remaining:' : 'Days Expired:'}
-          </Text>
-          <Text style={[styles.overviewName, { 
-            color: selectedMember.subscriptionStatus === 'active' 
-              ? COLORS.success 
-              : COLORS.error,
-            fontSize: 24,
-          }]}>
-            {Math.abs(calculateRemainingDays(selectedMember.currentSubscription.end_date))} days
-          </Text>
-        </View>
-
-        <View style={styles.sectionDivider} />
-
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={styles.inputLabel}>Total Amount:</Text>
-          <Text style={styles.paymentSummaryValue}>
-            {formatRupees(selectedMember.currentSubscription.total_amount || selectedMember.currentSubscription.subscription?.price || 0)}
-          </Text>
-        </View>
-
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={styles.inputLabel}>Amount Paid:</Text>
-          <Text style={[styles.paymentSummaryValue, { color: COLORS.success }]}>
-            {formatRupees(selectedMember.currentSubscription.paid_amount || selectedMember.currentSubscription.amount_paid || 0)}
-          </Text>
-        </View>
-
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={styles.inputLabel}>Pending Amount:</Text>
-          <Text style={[styles.paymentSummaryValue, { color: COLORS.warning }]}>
-            {formatRupees(selectedMember.currentSubscription.pending_amount || 0)}
-          </Text>
-        </View>
-      </View>
-
-      <Button
-        title="Renew Subscription"
-        onPress={() => {
-          setShowRenewModal(true);
-          setRenewSubscription(null);
-          setRenewAmountReceived('');
-          setRenewPaymentMethod('cash');
-        }}
-        style={{ marginTop: 20 }}
-      />
-    </>
-  ) : (
-    <>
-      <Text style={styles.noDataText}>No active subscription</Text>
-      <Button
-        title="Add Subscription"
-        onPress={() => {
-          setShowRenewModal(true);
-          setRenewSubscription(null);
-          setRenewAmountReceived('');
-          setRenewPaymentMethod('cash');
-        }}
-        style={{ marginTop: 12 }}
-      />
-    </>
-  )}
-</Card>
-
-                  {/* Stats Cards */}
-                  <View style={styles.statsGrid}>
-                    <Card style={styles.statCard}>
-                      <Activity size={24} color={theme.colors.primary} />
-                      <Text style={styles.statValue}>
-                        {selectedMember.stats?.totalWorkouts || 0}
-                      </Text>
-                      <Text style={styles.statLabel}>Total Workouts</Text>
-                    </Card>
-                    <Card style={styles.statCard}>
-                      <Flame size={24} color={theme.colors.error} />
-                      <Text style={styles.statValue}>
-                        {selectedMember.stats?.totalCaloriesBurned || 0}
-                      </Text>
-                      <Text style={styles.statLabel}>Calories Burned</Text>
-                    </Card>
-                    <Card style={styles.statCard}>
-                      <Clock size={24} color={theme.colors.success} />
-                      <Text style={styles.statValue}>
-                        {selectedMember.stats?.totalMinutes || 0}
-                      </Text>
-                      <Text style={styles.statLabel}>Total Minutes</Text>
-                    </Card>
-                    <Card style={styles.statCard}>
-                      <UtensilsCrossed size={24} color={theme.colors.warning} />
-                      <Text style={styles.statValue}>
-                        {selectedMember.stats?.totalMeals || 0}
-                      </Text>
-                      <Text style={styles.statLabel}>Meals Logged</Text>
-                    </Card>
-                  </View>
-
-                  {/* Recent Workouts */}
-                  <Card style={styles.sectionCard}>
-                    <Text style={styles.sectionTitle}>Recent Workouts</Text>
-                    {selectedMember.workout_logs &&
-                      selectedMember.workout_logs.length > 0 ? (
-                      selectedMember.workout_logs
-                        .slice(0, 5)
-                        .map((workout, index) => (
-                          <View key={index} style={styles.workoutItem}>
-                            <View style={styles.workoutInfo}>
-                              <Text style={styles.workoutName}>
-                                {(workout.workout as { name: string } | undefined)?.name ||
-                                  'Unknown Workout'}
-                              </Text>
-                              <Text style={styles.workoutDetails}>
-                                {workout.duration_minutes} min •{' '}
-                                {Number(workout.calories_burned).toFixed(0)} cal
-                              </Text>
-                            </View>
-                            <Text style={styles.workoutDate}>
-                              {new Date(
-                                workout.completed_at
-                              ).toLocaleDateString()}
-                            </Text>
-                          </View>
-                        ))
-                    ) : (
-                      <Text style={styles.noDataText}>No workouts recorded</Text>
-                    )}
-                  </Card>
-
-                  {/* Recent Diet Logs */}
-                  <Card style={styles.sectionCard}>
-                    <Text style={styles.sectionTitle}>Recent Meals</Text>
-                    {selectedMember.diet_logs &&
-                      selectedMember.diet_logs.length > 0 ? (
-                      selectedMember.diet_logs.slice(0, 5).map((meal, index) => (
-                        <View key={index} style={styles.mealItem}>
-                          <View style={styles.mealInfo}>
-                            <Text style={styles.mealName}>{meal.meal_name}</Text>
-                            <Text style={styles.mealDetails}>
-                              {meal.meal_type} •{' '}
-                              {Number(meal.calories).toFixed(0)} cal
-                            </Text>
-                          </View>
-                          <Text style={styles.mealDate}>
-                            {new Date(meal.logged_at).toLocaleDateString()}
-                          </Text>
-                        </View>
-                      ))
-                    ) : (
-                      <Text style={styles.noDataText}>No meals logged</Text>
-                    )}
-                  </Card>
-
-                  {/* Danger Zone */}
-                  <Card style={styles.dangerCard}>
-                    <Text style={styles.dangerTitle}>Danger Zone</Text>
-                    <Text style={styles.dangerSubtitle}>
-                      Permanently delete this member and all their data
-                    </Text>
-                    <Button
-                      title="Delete Member"
-                      onPress={() =>
-                        deleteMember(selectedMember.id, selectedMember.full_name)
-                      }
-                      variant="outline"
-                      style={styles.deleteButton}
-                      textStyle={styles.deleteButtonText}
-                    />
-                  </Card>
-                </>
-              )}
-            </ScrollView>
-          </View>
-        </Modal>
-
-        {/* Renewal Modal */}
-<Modal
-  visible={showRenewModal}
-  animationType="slide"
-  presentationStyle="pageSheet"
-  onRequestClose={() => setShowRenewModal(false)}
->
-  <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
-    <View style={styles.modalContainer}>
-      <View style={styles.modalHeader}>
-        <Text style={styles.modalTitle}>
-          {selectedMember?.currentSubscription ? 'Renew Subscription' : 'Add Subscription'}
-        </Text>
-        <TouchableOpacity
-          onPress={() => setShowRenewModal(false)}
-          style={styles.closeButton}
-          activeOpacity={0.7}
-        >
-          <X size={24} color={COLORS.text} />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        style={styles.modalScrollView}
-        contentContainerStyle={styles.modalContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={styles.helperText}>
-          Select a new subscription plan for {selectedMember?.full_name}
-        </Text>
-
-        <View style={styles.sectionDivider} />
-
-        {availableSubscriptions.length > 0 ? (
-          <>
-            <Text style={styles.inputLabel}>Select Plan *</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.subscriptionScroll}
-            >
-              {availableSubscriptions.map((sub) => (
+          <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Pay Pending Amount</Text>
                 <TouchableOpacity
-                  key={sub.id}
-                  style={[
-                    styles.subscriptionOption,
-                    renewSubscription?.id === sub.id && styles.subscriptionOptionSelected,
-                  ]}
-                  onPress={() => {
-                    setRenewSubscription(sub);
-                    setRenewAmountReceived('');
-                  }}
-                  activeOpacity={0.7}
+                  onPress={() => setShowPayPendingModal(false)}
+                  style={styles.closeButton}
                 >
-                  <Text
-                    style={[
-                      styles.subscriptionName,
-                      renewSubscription?.id === sub.id && styles.subscriptionNameSelected,
-                    ]}
-                  >
-                    {sub.name}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.subscriptionPrice,
-                      renewSubscription?.id === sub.id && styles.subscriptionPriceSelected,
-                    ]}
-                  >
-                    ₹{sub.price}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.subscriptionDuration,
-                      renewSubscription?.id === sub.id && styles.subscriptionDurationSelected,
-                    ]}
-                  >
-                    {sub.duration_months} month{sub.duration_months > 1 ? 's' : ''}
-                  </Text>
+                  <X size={24} color={theme.colors.text} />
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
+              </View>
 
-            {renewSubscription && (
-              <>
-                <Text style={styles.inputLabel}>Payment Method</Text>
-                <View style={styles.paymentMethodRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.paymentMethodOption,
-                      renewPaymentMethod === 'cash' && styles.paymentMethodOptionSelected,
-                    ]}
-                    onPress={() => setRenewPaymentMethod('cash')}
-                    activeOpacity={0.7}
-                  >
-                    <DollarSign
-                      size={20}
-                      color={renewPaymentMethod === 'cash' ? COLORS.cardBg : COLORS.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.paymentMethodText,
-                        renewPaymentMethod === 'cash' && styles.paymentMethodTextSelected,
-                      ]}
-                    >
-                      Cash
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.paymentMethodOption,
-                      renewPaymentMethod === 'online' && styles.paymentMethodOptionSelected,
-                    ]}
-                    onPress={() => setRenewPaymentMethod('online')}
-                    activeOpacity={0.7}
-                  >
-                    <CreditCard
-                      size={20}
-                      color={renewPaymentMethod === 'online' ? COLORS.cardBg : COLORS.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.paymentMethodText,
-                        renewPaymentMethod === 'online' && styles.paymentMethodTextSelected,
-                      ]}
-                    >
-                      Online
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {renewPaymentMethod === 'cash' && (
+              <ScrollView
+                style={styles.modalScrollView}
+                contentContainerStyle={styles.modalContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                {selectedMember?.currentSubscription && (
                   <>
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.inputLabel}>Plan Amount</Text>
-                      <TextInput
-                        style={[styles.input, styles.inputReadonly]}
-                        value={`₹${renewSubscription.price}`}
-                        editable={false}
-                      />
-                    </View>
+                    <Card style={styles.overviewCard}>
+                      <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                        <Text style={styles.inputLabel}>Current Pending Amount</Text>
+                        <Text style={[styles.paymentSummaryTotalValue, { fontSize: 36, marginTop: 8, color: theme.colors.warning }]}>
+                          {formatRupees(selectedMember.currentSubscription.pending_amount || 0)}
+                        </Text>
+                      </View>
+                    </Card>
 
                     <View style={styles.inputGroup}>
-                      <Text style={styles.inputLabel}>Amount Received *</Text>
+                      <Text style={styles.inputLabel}>Payment Amount *</Text>
                       <TextInput
                         style={styles.input}
-                        placeholder="Enter amount received"
-                        placeholderTextColor={COLORS.textSecondary}
-                        value={renewAmountReceived}
-                        onChangeText={setRenewAmountReceived}
+                        placeholder="Enter payment amount"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={pendingPaymentAmount}
+                        onChangeText={setPendingPaymentAmount}
                         keyboardType="decimal-pad"
                       />
                       <Text style={styles.helperText}>
-                        Enter the amount customer paid (can be partial)
+                        Maximum: {formatRupees(selectedMember.currentSubscription.pending_amount || 0)}
                       </Text>
-                    </View>
-
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.inputLabel}>Pending Amount</Text>
-                      <TextInput
-                        style={[styles.input, styles.inputReadonly]}
-                        value={`₹${Math.max(
-                          0,
-                          renewSubscription.price - (parseFloat(renewAmountReceived) || 0)
-                        ).toFixed(2)}`}
-                        editable={false}
-                      />
-                    </View>
-
-                    {/* Payment Summary */}
-                    <View style={styles.paymentSummary}>
-                      <View style={styles.paymentSummaryRow}>
-                        <Text style={styles.paymentSummaryLabel}>Plan Amount:</Text>
-                        <Text style={styles.paymentSummaryValue}>₹{renewSubscription.price}</Text>
-                      </View>
-                      <View style={styles.paymentSummaryRow}>
-                        <Text style={styles.paymentSummaryLabel}>Amount Received:</Text>
-                        <Text style={styles.paymentSummaryValue}>
-                          ₹{renewAmountReceived ? parseFloat(renewAmountReceived).toFixed(2) : '0.00'}
-                        </Text>
-                      </View>
-                      <View style={[styles.paymentSummaryRow, styles.paymentSummaryTotal]}>
-                        <Text style={styles.paymentSummaryTotalLabel}>Pending Amount:</Text>
-                        <View style={{ alignItems: 'flex-end', gap: 8 }}>
-                          <Text style={styles.paymentSummaryTotalValue}>
-                            ₹
-                            {Math.max(
-                              0,
-                              renewSubscription.price - (parseFloat(renewAmountReceived) || 0)
-                            ).toFixed(2)}
-                          </Text>
-                          <View
-                            style={[
-                              styles.paymentStatusBadge,
-                              Math.max(
-                                0,
-                                renewSubscription.price - (parseFloat(renewAmountReceived) || 0)
-                              ) === 0
-                                ? styles.paymentStatusBadgeComplete
-                                : styles.paymentStatusBadgePartial,
-                            ]}
-                          >
-                            {Math.max(
-                              0,
-                              renewSubscription.price - (parseFloat(renewAmountReceived) || 0)
-                            ) === 0 ? (
-                              <>
-                                <CheckCircle size={14} color={COLORS.success} />
-                                <Text style={[styles.paymentStatusText, styles.paymentStatusTextComplete]}>
-                                  Fully Paid
-                                </Text>
-                              </>
-                            ) : (
-                              <>
-                                <AlertCircle size={14} color={COLORS.warning} />
-                                <Text style={[styles.paymentStatusText, styles.paymentStatusTextPartial]}>
-                                  Partial Payment
-                                </Text>
-                              </>
-                            )}
-                          </View>
-                        </View>
-                      </View>
                     </View>
 
                     <View style={styles.inputGroup}>
@@ -2692,9 +2597,9 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                       <TextInput
                         style={styles.input}
                         placeholder="Auto-generated if left blank"
-                        placeholderTextColor={COLORS.textSecondary}
-                        value={renewReceiptNumber}
-                        onChangeText={setRenewReceiptNumber}
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={pendingReceiptNumber}
+                        onChangeText={setPendingReceiptNumber}
                       />
                     </View>
 
@@ -2702,43 +2607,846 @@ const [renewPaymentNotes, setRenewPaymentNotes] = useState('');
                       <Text style={styles.inputLabel}>Payment Notes (Optional)</Text>
                       <TextInput
                         style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
-                        placeholder="Add any notes about this payment..."
-                        placeholderTextColor={COLORS.textSecondary}
-                        value={renewPaymentNotes}
-                        onChangeText={setRenewPaymentNotes}
+                        placeholder="Add notes about this payment..."
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={pendingPaymentNotes}
+                        onChangeText={setPendingPaymentNotes}
                         multiline
                         numberOfLines={3}
                       />
                     </View>
+
+                    <Button
+                      title="Collect Payment"
+                      onPress={payPendingAmount}
+                      isLoading={isLoading}
+                      disabled={!pendingPaymentAmount || parseFloat(pendingPaymentAmount) <= 0}
+                      style={styles.addButton}
+                    />
                   </>
                 )}
+              </ScrollView>
+            </View>
+          </SafeAreaView>
+        </Modal>
 
-                {renewPaymentMethod === 'online' && (
+        {/* ==================== ATTENDANCE CALENDAR MODAL (IMPROVED) ==================== */}
+        <Modal
+          visible={showAttendanceCalendar}
+          animationType="slide"
+          presentationStyle="fullScreen"
+          onRequestClose={() => setShowAttendanceCalendar(false)}
+        >
+          <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
+            <View style={styles.modalContainer}>
+              {/* Header */}
+              <View style={styles.modalHeader}>
+                <View style={styles.attendanceHeaderContent}>
+                  <Calendar size={24} color={theme.colors.primary} />
+                  <Text style={styles.modalTitle}>Attendance Calendar</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setShowAttendanceCalendar(false)}
+                  style={styles.closeButton}
+                >
+                  <X size={24} color={theme.colors.text} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                style={styles.modalScrollView}
+                contentContainerStyle={styles.modalContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {/* Overall Stats Card */}
+                <Card style={styles.attendanceStatsCard}>
+                  <View style={styles.attendanceStatsHeader}>
+                    <View style={styles.memberAvatarSmall}>
+                      <User size={20} color="#ffffff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.attendanceStatsName}>{selectedMember?.full_name}</Text>
+                      <Text style={styles.attendanceStatsSubtext}>Overall Attendance Summary</Text>
+                    </View>
+                  </View>
+
+                  {(() => {
+                    const totalCheckIns = memberAttendance.length;
+
+                    // Calculate date range
+                    let earliestDate = new Date();
+                    let latestDate = new Date();
+
+                    if (totalCheckIns > 0) {
+                      const dates = memberAttendance.map(a => new Date(a.attendance_date));
+                      earliestDate = new Date(Math.min(...dates.map(d => d.getTime())));
+                      latestDate = new Date(Math.max(...dates.map(d => d.getTime())));
+                    }
+
+                    // Calculate total days between first and last check-in
+                    const daysDifference = totalCheckIns > 0
+                      ? Math.ceil((latestDate.getTime() - earliestDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+                      : 0;
+
+                    const attendanceRate = daysDifference > 0
+                      ? ((totalCheckIns / daysDifference) * 100).toFixed(1)
+                      : 0;
+
+                    return (
+                      <View style={styles.attendanceOverallStats}>
+                        <View style={styles.attendanceStatBox}>
+                          <View style={[styles.attendanceStatIcon, { backgroundColor: theme.colors.primary + '20' }]}>
+                            <CheckCircle size={24} color={theme.colors.primary} />
+                          </View>
+                          <Text style={styles.attendanceStatValue}>{totalCheckIns}</Text>
+                          <Text style={styles.attendanceStatLabel}>Total Check-ins</Text>
+                        </View>
+
+                        <View style={styles.attendanceStatBox}>
+                          <View style={[styles.attendanceStatIcon, { backgroundColor: theme.colors.success + '20' }]}>
+                            <Calendar size={24} color={theme.colors.success} />
+                          </View>
+                          <Text style={styles.attendanceStatValue}>{daysDifference}</Text>
+                          <Text style={styles.attendanceStatLabel}>Total Days</Text>
+                        </View>
+
+                        <View style={styles.attendanceStatBox}>
+                          <View style={[styles.attendanceStatIcon, { backgroundColor: theme.colors.warning + '20' }]}>
+                            <TrendingUp size={24} color={theme.colors.warning} />
+                          </View>
+                          <Text style={styles.attendanceStatValue}>{attendanceRate}%</Text>
+                          <Text style={styles.attendanceStatLabel}>Attendance Rate</Text>
+                        </View>
+                      </View>
+                    );
+                  })()}
+                </Card>
+
+                {/* Monthly Breakdown */}
+                {(() => {
+                  const monthlyData: { [key: string]: any[] } = {};
+                  const dailyCheckIns: { [key: string]: number } = {};
+
+                  // Group by month and count daily check-ins
+                  memberAttendance.forEach((att) => {
+                    const date = new Date(att.attendance_date);
+                    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                    const dateKey = att.attendance_date;
+
+                    if (!monthlyData[monthKey]) {
+                      monthlyData[monthKey] = [];
+                    }
+                    monthlyData[monthKey].push(att);
+
+                    dailyCheckIns[dateKey] = (dailyCheckIns[dateKey] || 0) + 1;
+                  });
+
+                  return Object.keys(monthlyData)
+                    .sort()
+                    .reverse()
+                    .map((monthKey) => {
+                      const [year, month] = monthKey.split('-');
+                      const monthDate = new Date(parseInt(year), parseInt(month) - 1);
+                      const monthName = monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                      const daysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
+                      const firstDay = new Date(parseInt(year), parseInt(month) - 1, 1).getDay();
+
+                      const attendanceDates = new Set(
+                        monthlyData[monthKey].map(a => new Date(a.attendance_date).getDate())
+                      );
+
+                      const attendedDays = attendanceDates.size;
+                      const monthAttendanceRate = ((attendedDays / daysInMonth) * 100).toFixed(1);
+                      const totalCheckInsThisMonth = monthlyData[monthKey].length;
+
+                      return (
+                        <Card key={monthKey} style={styles.monthCard}>
+                          {/* Month Header */}
+                          <View style={styles.monthHeader}>
+                            <View>
+                              <Text style={styles.monthTitle}>{monthName}</Text>
+                              <Text style={styles.monthSubtitle}>
+                                {attendedDays} of {daysInMonth} days attended
+                              </Text>
+                            </View>
+                            <View style={styles.monthStatsChip}>
+                              <Text style={styles.monthStatsChipText}>{monthAttendanceRate}%</Text>
+                            </View>
+                          </View>
+
+                          {/* Month Stats Row */}
+                          <View style={styles.monthStatsRow}>
+                            <View style={styles.monthStatItem}>
+                              <Text style={styles.monthStatValue}>{totalCheckInsThisMonth}</Text>
+                              <Text style={styles.monthStatLabel}>Check-ins</Text>
+                            </View>
+                            <View style={styles.monthStatItem}>
+                              <Text style={styles.monthStatValue}>{attendedDays}</Text>
+                              <Text style={styles.monthStatLabel}>Days Present</Text>
+                            </View>
+                            <View style={styles.monthStatItem}>
+                              <Text style={styles.monthStatValue}>{daysInMonth - attendedDays}</Text>
+                              <Text style={styles.monthStatLabel}>Days Missed</Text>
+                            </View>
+                          </View>
+
+                          {/* Calendar Grid */}
+                          <View style={styles.calendarContainer}>
+                            {/* Week days header */}
+                            <View style={styles.calendarWeekRow}>
+                              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+                                <View key={index} style={styles.calendarHeaderCell}>
+                                  <Text style={styles.calendarHeaderText}>{day}</Text>
+                                </View>
+                              ))}
+                            </View>
+
+                            {/* Days grid */}
+                            <View style={styles.calendarDaysGrid}>
+                              {/* Empty cells for days before month starts */}
+                              {Array.from({ length: firstDay }).map((_, i) => (
+                                <View key={`empty-${i}`} style={styles.calendarDayCell} />
+                              ))}
+
+                              {/* Actual days */}
+                              {Array.from({ length: daysInMonth }).map((_, i) => {
+                                const dayNumber = i + 1;
+                                const hasAttendance = attendanceDates.has(dayNumber);
+                                const dateKey = `${year}-${month}-${String(dayNumber).padStart(2, '0')}`;
+                                const checkInCount = dailyCheckIns[dateKey] || 0;
+
+                                const isToday =
+                                  new Date().getDate() === dayNumber &&
+                                  new Date().getMonth() === parseInt(month) - 1 &&
+                                  new Date().getFullYear() === parseInt(year);
+
+                                return (
+                                  <View
+                                    key={dayNumber}
+                                    style={[
+                                      styles.calendarDayCell,
+                                      hasAttendance && styles.calendarDayCellAttended,
+                                      isToday && styles.calendarDayCellToday,
+                                    ]}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.calendarDayText,
+                                        hasAttendance && styles.calendarDayTextAttended,
+                                        isToday && styles.calendarDayTextToday,
+                                      ]}
+                                    >
+                                      {dayNumber}
+                                    </Text>
+                                    {hasAttendance && (
+                                      <>
+                                        <View style={styles.attendanceIndicator}>
+                                          <CheckCircle size={10} color={theme.colors.success} />
+                                        </View>
+                                        {checkInCount > 1 && (
+                                          <View style={styles.checkInBadge}>
+                                            <Text style={styles.checkInBadgeText}>{checkInCount}</Text>
+                                          </View>
+                                        )}
+                                      </>
+                                    )}
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          </View>
+
+                          {/* Legend */}
+                          <View style={styles.legendContainer}>
+                            <View style={styles.legendItem}>
+                              <View style={[styles.legendDot, { backgroundColor: theme.colors.success }]} />
+                              <Text style={styles.legendText}>Present</Text>
+                            </View>
+                            <View style={styles.legendItem}>
+                              <View style={[styles.legendDot, { backgroundColor: theme.colors.primary }]} />
+                              <Text style={styles.legendText}>Today</Text>
+                            </View>
+                            <View style={styles.legendItem}>
+                              <View style={[styles.legendDot, { backgroundColor: theme.colors.border }]} />
+                              <Text style={styles.legendText}>Absent</Text>
+                            </View>
+                          </View>
+                        </Card>
+                      );
+                    });
+                })()}
+
+                {memberAttendance.length === 0 && (
+                  <Card style={styles.emptyStateCard}>
+                    <Calendar size={64} color={theme.colors.textSecondary} />
+                    <Text style={styles.emptyStateTitle}>No Attendance Records</Text>
+                    <Text style={styles.emptyStateText}>
+                      This member hasn't checked in yet
+                    </Text>
+                  </Card>
+                )}
+              </ScrollView>
+            </View>
+          </SafeAreaView>
+        </Modal>
+
+        {/* ==================== MEMBER DETAILS MODAL ==================== */}
+        <Modal
+          visible={showMemberDetails}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowMemberDetails(false)}
+        >
+          <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>{selectedMember?.full_name}</Text>
+                <TouchableOpacity onPress={() => setShowMemberDetails(false)} style={styles.closeButton}>
+                  <X size={24} color={theme.colors.text} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                style={styles.modalScrollView}
+                contentContainerStyle={styles.modalContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {selectedMember && (
+                  <>
+                    {/* Member Overview - NO EMAIL/PHONE */}
+                    <Card style={styles.overviewCard}>
+                      <View style={styles.overviewHeader}>
+                        <View style={styles.memberAvatarLarge}>
+                          <User size={32} color="#ffffff" />
+                        </View>
+                        <View style={styles.overviewInfo}>
+                          <Text style={styles.overviewName}>{selectedMember.full_name}</Text>
+                          <View style={styles.overviewStats}>
+                            <Text style={styles.overviewLevel}>Level {selectedMember.level}</Text>
+                            <Text style={styles.overviewPoints}>{selectedMember.total_points} XP</Text>
+                            <Text style={styles.overviewStreak}>{selectedMember.current_streak} day streak</Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Attendance Calendar Button */}
+                      <Button
+                        title="View Attendance Calendar"
+                        onPress={() => fetchMemberAttendance(selectedMember.id)}
+                        variant="outline"
+                        style={{ marginTop: 16 }}
+                        icon={<Calendar size={20} color={theme.colors.primary} />}
+                      />
+                    </Card>
+
+                    {/* Personal Training Toggle */}
+                    <Card style={styles.overviewCard}>
+                      <View style={styles.toggleContainer}>
+                        <Text style={styles.toggleLabel}>Personal Training</Text>
+                        <TouchableOpacity
+                          style={[
+                            styles.toggleSwitch,
+                            selectedMember.has_personal_training && styles.toggleSwitchActive,
+                          ]}
+                          onPress={async () => {
+                            try {
+                              const newValue = !selectedMember.has_personal_training;
+                              const { error } = await supabase
+                                .from('profiles')
+                                .update({ has_personal_training: newValue })
+                                .eq('id', selectedMember.id);
+
+                              if (error) throw error;
+
+                              if (newValue) {
+                                const { data: existing } = await supabase
+                                  .from('personal_training_assignments')
+                                  .select('id')
+                                  .eq('user_id', selectedMember.id)
+                                  .single();
+
+                                if (!existing && profile?.gym_id) {
+                                  await supabase.from('personal_training_assignments').insert([
+                                    {
+                                      user_id: selectedMember.id,
+                                      gym_id: profile.gym_id,
+                                      assigned_by: profile.id,
+                                      is_active: true,
+                                      start_date: new Date().toISOString().split('T')[0],
+                                    },
+                                  ]);
+                                }
+                              } else {
+                                await supabase
+                                  .from('personal_training_assignments')
+                                  .update({ is_active: false })
+                                  .eq('user_id', selectedMember.id);
+                              }
+
+                              setSelectedMember({
+                                ...selectedMember,
+                                has_personal_training: newValue,
+                              });
+                              Alert.alert('Success', `Personal training ${newValue ? 'enabled' : 'disabled'}`);
+                            } catch (error) {
+                              console.error('Error updating personal training:', error);
+                              Alert.alert('Error', 'Failed to update personal training status');
+                            }
+                          }}
+                        >
+                          <View
+                            style={[
+                              styles.toggleThumb,
+                              selectedMember.has_personal_training && styles.toggleThumbActive,
+                            ]}
+                          />
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={styles.helperText}>
+                        {selectedMember.has_personal_training
+                          ? 'Member has access to personal training diet plans'
+                          : 'Enable to provide custom diet plans for this member'}
+                      </Text>
+                    </Card>
+
+                    {/* Subscription Details */}
+                    <Card style={styles.overviewCard}>
+                      <Text style={styles.sectionTitle}>Subscription Details</Text>
+
+                      {selectedMember.currentSubscription ? (
+                        <>
+                          <View style={{ gap: 12 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Text style={styles.inputLabel}>Plan Name:</Text>
+                              <Text style={styles.overviewName}>
+                                {selectedMember.currentSubscription.subscription?.name || 'N/A'}
+                              </Text>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                              <Text style={styles.inputLabel}>Status:</Text>
+                              {selectedMember.subscriptionStatus === 'active' && (
+                                <View style={styles.activeBadge}>
+                                  <CheckCircle size={14} color={theme.colors.success} />
+                                  <Text style={styles.activeBadgeText}>Active</Text>
+                                </View>
+                              )}
+                              {selectedMember.subscriptionStatus === 'expired' && (
+                                <View style={styles.expiredBadge}>
+                                  <AlertCircle size={14} color={theme.colors.error} />
+                                  <Text style={styles.expiredBadgeText}>Expired</Text>
+                                </View>
+                              )}
+                            </View>
+
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                              <Text style={styles.inputLabel}>Start Date:</Text>
+                              <Text style={styles.subscriptionDate}>
+                                {new Date(selectedMember.currentSubscription.start_date).toLocaleDateString()}
+                              </Text>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                              <Text style={styles.inputLabel}>End Date:</Text>
+                              <Text style={styles.subscriptionDate}>
+                                {new Date(selectedMember.currentSubscription.end_date).toLocaleDateString()}
+                              </Text>
+                            </View>
+
+                            <View style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              paddingVertical: 12,
+                              paddingHorizontal: 16,
+                              backgroundColor: selectedMember.subscriptionStatus === 'active'
+                                ? theme.colors.success + '20'
+                                : theme.colors.error + '20',
+                              borderRadius: 8,
+                            }}>
+                              <Text style={[styles.inputLabel, {
+                                color: selectedMember.subscriptionStatus === 'active'
+                                  ? theme.colors.success
+                                  : theme.colors.error,
+                                fontWeight: '700',
+                              }]}>
+                                {selectedMember.subscriptionStatus === 'active' ? 'Days Remaining:' : 'Days Expired:'}
+                              </Text>
+                              <Text style={[styles.overviewName, {
+                                color: selectedMember.subscriptionStatus === 'active'
+                                  ? theme.colors.success
+                                  : theme.colors.error,
+                                fontSize: 24,
+                              }]}>
+                                {Math.abs(calculateRemainingDays(selectedMember.currentSubscription.end_date))} days
+                              </Text>
+                            </View>
+
+                            <View style={styles.sectionDivider} />
+
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                              <Text style={styles.inputLabel}>Total Amount:</Text>
+                              <Text style={styles.paymentSummaryValue}>
+                                {formatRupees(selectedMember.currentSubscription.total_amount || selectedMember.currentSubscription.subscription?.price || 0)}
+                              </Text>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                              <Text style={styles.inputLabel}>Amount Paid:</Text>
+                              <Text style={[styles.paymentSummaryValue, { color: theme.colors.success }]}>
+                                {formatRupees(selectedMember.currentSubscription.paid_amount || 0)}
+                              </Text>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                              <Text style={styles.inputLabel}>Pending Amount:</Text>
+                              <Text style={[styles.paymentSummaryValue, { color: theme.colors.warning }]}>
+                                {formatRupees(selectedMember.currentSubscription.pending_amount || 0)}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Pay Pending Button */}
+                          {(selectedMember.currentSubscription.pending_amount || 0) > 0 && (
+                            <Button
+                              title={`Pay Pending ${formatRupees(selectedMember.currentSubscription.pending_amount)}`}
+                              onPress={() => {
+                                setPendingPaymentAmount('');
+                                setPendingReceiptNumber('');
+                                setPendingPaymentNotes('');
+                                // Close details modal first, then open payment modal
+                                setShowMemberDetails(false);
+                                setTimeout(() => {
+                                  setShowPayPendingModal(true);
+                                }, 300);
+                              }}
+                              variant="outline"
+                              style={{
+                                marginTop: 16,
+                                borderColor: theme.colors.warning,
+                                backgroundColor: theme.colors.warning + '10',
+                              }}
+                              textStyle={{ color: theme.colors.warning }}
+                            />
+                          )}
+
+                          <Button
+                            title="Renew Subscription"
+                            onPress={() => {
+                              setShowRenewModal(true);
+                              setRenewSubscription(null);
+                              setRenewAmountReceived('');
+                              setRenewPaymentMethod('cash');
+                            }}
+                            style={{ marginTop: 12 }}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <Text style={styles.noDataText}>No active subscription</Text>
+                          <Button
+                            title="Add Subscription"
+                            onPress={() => {
+                              setShowRenewModal(true);
+                              setRenewSubscription(null);
+                              setRenewAmountReceived('');
+                              setRenewPaymentMethod('cash');
+                            }}
+                            style={{ marginTop: 12 }}
+                          />
+                        </>
+                      )}
+                    </Card>
+
+                    {/* Stats Cards */}
+                    <View style={styles.statsGrid}>
+                      <Card style={styles.statCard}>
+                        <Activity size={24} color={theme.colors.primary} />
+                        <Text style={styles.statValue}>{selectedMember.stats?.totalWorkouts || 0}</Text>
+                        <Text style={styles.statLabel}>Total Workouts</Text>
+                      </Card>
+                      <Card style={styles.statCard}>
+                        <Flame size={24} color={theme.colors.error} />
+                        <Text style={styles.statValue}>{selectedMember.stats?.totalCaloriesBurned || 0}</Text>
+                        <Text style={styles.statLabel}>Calories Burned</Text>
+                      </Card>
+                      <Card style={styles.statCard}>
+                        <Clock size={24} color={theme.colors.success} />
+                        <Text style={styles.statValue}>{selectedMember.stats?.totalMinutes || 0}</Text>
+                        <Text style={styles.statLabel}>Total Minutes</Text>
+                      </Card>
+                      <Card style={styles.statCard}>
+                        <UtensilsCrossed size={24} color={theme.colors.warning} />
+                        <Text style={styles.statValue}>{selectedMember.stats?.totalMeals || 0}</Text>
+                        <Text style={styles.statLabel}>Meals Logged</Text>
+                      </Card>
+                    </View>
+
+                    {/* Danger Zone */}
+                    <Card style={styles.dangerCard}>
+                      <Text style={styles.dangerTitle}>Danger Zone</Text>
+                      <Text style={styles.dangerSubtitle}>
+                        Permanently delete this member and all their data
+                      </Text>
+                      <Button
+                        title="Delete Member"
+                        onPress={() => deleteMember(selectedMember.id, selectedMember.full_name)}
+                        variant="outline"
+                        style={styles.deleteButton}
+                        textStyle={styles.deleteButtonText}
+                      />
+                    </Card>
+                  </>
+                )}
+              </ScrollView>
+            </View>
+          </SafeAreaView>
+        </Modal>
+
+
+        {/* ==================== RENEW SUBSCRIPTION MODAL ==================== */}
+        <Modal
+          visible={showRenewModal}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowRenewModal(false)}
+        >
+          <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  {selectedMember?.currentSubscription ? 'Renew Subscription' : 'Add Subscription'}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setShowRenewModal(false)}
+                  style={styles.closeButton}
+                >
+                  <X size={24} color={theme.colors.text} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                style={styles.modalScrollView}
+                contentContainerStyle={styles.modalContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                <Text style={styles.helperText}>
+                  Select a new subscription plan for {selectedMember?.full_name}
+                </Text>
+
+                <View style={styles.sectionDivider} />
+
+                {availableSubscriptions.length > 0 ? (
+                  <>
+                    <Text style={styles.inputLabel}>Select Plan *</Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={styles.subscriptionScroll}
+                    >
+                      {availableSubscriptions.map((sub) => (
+                        <TouchableOpacity
+                          key={sub.id}
+                          style={[
+                            styles.subscriptionOption,
+                            renewSubscription?.id === sub.id && styles.subscriptionOptionSelected,
+                          ]}
+                          onPress={() => {
+                            setRenewSubscription(sub);
+                            setRenewAmountReceived('');
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[
+                            styles.subscriptionName,
+                            renewSubscription?.id === sub.id && styles.subscriptionNameSelected,
+                          ]}>
+                            {sub.name}
+                          </Text>
+                          <Text style={[
+                            styles.subscriptionPrice,
+                            renewSubscription?.id === sub.id && styles.subscriptionPriceSelected,
+                          ]}>
+                            ₹{sub.price}
+                          </Text>
+                          <Text style={[
+                            styles.subscriptionDuration,
+                            renewSubscription?.id === sub.id && styles.subscriptionDurationSelected,
+                          ]}>
+                            {sub.duration_months} month{sub.duration_months > 1 ? 's' : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+
+                    {renewSubscription && (
+                      <>
+                        <Text style={styles.inputLabel}>Payment Method</Text>
+                        <View style={styles.paymentMethodRow}>
+                          <TouchableOpacity
+                            style={[
+                              styles.paymentMethodOption,
+                              renewPaymentMethod === 'cash' && styles.paymentMethodOptionSelected,
+                            ]}
+                            onPress={() => setRenewPaymentMethod('cash')}
+                            activeOpacity={0.7}
+                          >
+                            <DollarSign size={20} color={renewPaymentMethod === 'cash' ? '#FFFFFF' : theme.colors.textSecondary} />
+                            <Text style={[
+                              styles.paymentMethodText,
+                              renewPaymentMethod === 'cash' && styles.paymentMethodTextSelected,
+                            ]}>
+                              Cash
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.paymentMethodOption,
+                              renewPaymentMethod === 'online' && styles.paymentMethodOptionSelected,
+                            ]}
+                            onPress={() => setRenewPaymentMethod('online')}
+                            activeOpacity={0.7}
+                          >
+                            <CreditCard size={20} color={renewPaymentMethod === 'online' ? '#FFFFFF' : theme.colors.textSecondary} />
+                            <Text style={[
+                              styles.paymentMethodText,
+                              renewPaymentMethod === 'online' && styles.paymentMethodTextSelected,
+                            ]}>
+                              Online
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* Payment Fields (Same for both Cash and Online) */}
+                        <>
+                          <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Plan Amount</Text>
+                            <TextInput
+                              style={[styles.input, styles.inputReadonly]}
+                              value={`₹${renewSubscription.price}`}
+                              editable={false}
+                            />
+                          </View>
+
+                          <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Amount Received *</Text>
+                            <TextInput
+                              style={styles.input}
+                              placeholder="Enter amount received"
+                              placeholderTextColor={theme.colors.textSecondary}
+                              value={renewAmountReceived}
+                              onChangeText={setRenewAmountReceived}
+                              keyboardType="decimal-pad"
+                            />
+                            <Text style={styles.helperText}>
+                              Enter the amount customer paid (can be partial)
+                            </Text>
+                          </View>
+
+                          <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Pending Amount</Text>
+                            <TextInput
+                              style={[styles.input, styles.inputReadonly]}
+                              value={`₹${Math.max(0, renewSubscription.price - (parseFloat(renewAmountReceived) || 0)).toFixed(2)}`}
+                              editable={false}
+                            />
+                          </View>
+
+                          {/* Payment Summary */}
+                          <View style={styles.paymentSummary}>
+                            <View style={styles.paymentSummaryRow}>
+                              <Text style={styles.paymentSummaryLabel}>Plan Amount:</Text>
+                              <Text style={styles.paymentSummaryValue}>₹{renewSubscription.price}</Text>
+                            </View>
+                            <View style={styles.paymentSummaryRow}>
+                              <Text style={styles.paymentSummaryLabel}>Amount Received:</Text>
+                              <Text style={styles.paymentSummaryValue}>
+                                ₹{renewAmountReceived ? parseFloat(renewAmountReceived).toFixed(2) : '0.00'}
+                              </Text>
+                            </View>
+                            <View style={[styles.paymentSummaryRow, styles.paymentSummaryTotal]}>
+                              <Text style={styles.paymentSummaryTotalLabel}>Pending Amount:</Text>
+                              <View style={{ alignItems: 'flex-end', gap: 8 }}>
+                                <Text style={styles.paymentSummaryTotalValue}>
+                                  ₹{Math.max(0, renewSubscription.price - (parseFloat(renewAmountReceived) || 0)).toFixed(2)}
+                                </Text>
+                                <View style={[
+                                  styles.paymentStatusBadge,
+                                  Math.max(0, renewSubscription.price - (parseFloat(renewAmountReceived) || 0)) === 0
+                                    ? styles.paymentStatusBadgeComplete
+                                    : styles.paymentStatusBadgePartial,
+                                ]}>
+                                  {Math.max(0, renewSubscription.price - (parseFloat(renewAmountReceived) || 0)) === 0 ? (
+                                    <>
+                                      <CheckCircle size={14} color={theme.colors.success} />
+                                      <Text style={[styles.paymentStatusText, styles.paymentStatusTextComplete]}>
+                                        Fully Paid
+                                      </Text>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <AlertCircle size={14} color={theme.colors.warning} />
+                                      <Text style={[styles.paymentStatusText, styles.paymentStatusTextPartial]}>
+                                        Partial Payment
+                                      </Text>
+                                    </>
+                                  )}
+                                </View>
+                              </View>
+                            </View>
+                          </View>
+
+                          <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Receipt Number (Optional)</Text>
+                            <TextInput
+                              style={styles.input}
+                              placeholder="Auto-generated if left blank"
+                              placeholderTextColor={theme.colors.textSecondary}
+                              value={renewReceiptNumber}
+                              onChangeText={setRenewReceiptNumber}
+                            />
+                          </View>
+
+                          <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Payment Notes (Optional)</Text>
+                            <TextInput
+                              style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
+                              placeholder="Add any notes about this payment..."
+                              placeholderTextColor={theme.colors.textSecondary}
+                              value={renewPaymentNotes}
+                              onChangeText={setRenewPaymentNotes}
+                              multiline
+                              numberOfLines={3}
+                            />
+                          </View>
+
+                          {renewPaymentMethod === 'online' && (
+                            <Text style={styles.helperText}>
+                              💡 Member paid online. Amount will be recorded for tracking.
+                            </Text>
+                          )}
+                        </>
+                      </>
+                    )}
+                  </>
+                ) : (
                   <Text style={styles.helperText}>
-                    Member will complete online payment through the app. Subscription will be
-                    activated once payment is completed.
+                    No subscription plans available. Create plans in Subscriptions section.
                   </Text>
                 )}
-              </>
-            )}
-          </>
-        ) : (
-          <Text style={styles.helperText}>
-            No subscription plans available. Create plans in Subscriptions section.
-          </Text>
-        )}
 
-        <Button
-          title={selectedMember?.currentSubscription ? 'Renew Subscription' : 'Add Subscription'}
-          onPress={renewMemberSubscription}
-          isLoading={isLoading}
-          disabled={!renewSubscription}
-          style={styles.addButton}
-        />
-      </ScrollView>
-    </View>
-  </SafeAreaView>
-</Modal>
+                <Button
+                  title={selectedMember?.currentSubscription ? 'Renew Subscription' : 'Add Subscription'}
+                  onPress={renewMemberSubscription}
+                  isLoading={isLoading}
+                  disabled={!renewSubscription}
+                  style={styles.addButton}
+                />
+              </ScrollView>
+            </View>
+          </SafeAreaView>
+        </Modal>
       </Animated.View>
     </SafeAreaView>
   );
