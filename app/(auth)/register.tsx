@@ -524,7 +524,7 @@ export default function RegisterScreen() {
               <View style={styles.roleSection}>
                 <Text style={styles.roleLabel}>Register as</Text>
                 <View style={styles.roleSelector}>
-                  <TouchableOpacity
+                  {/* <TouchableOpacity
                     style={[
                       styles.roleButton,
                       selectedRole === 'member' && styles.roleButtonActive,
@@ -539,7 +539,7 @@ export default function RegisterScreen() {
                     ]}>
                       Member
                     </Text>
-                  </TouchableOpacity>
+                  </TouchableOpacity> */}
                   
                   <TouchableOpacity
                     style={[
