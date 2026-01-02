@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   Animated,
   FlatList,
+  Image
 } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -45,7 +46,7 @@ import {
   CreditCard,
   UserPlus,
 } from 'lucide-react-native';
-
+import { useGymData } from '@/hooks/useGymData';
 interface Stats {
   totalMembers: number;
   activeMembers: number;
@@ -419,6 +420,7 @@ export default function AdminDashboardScreen() {
       setIsLoading(false);
     }
   };
+  useGymData(fetchDashboardData);
 
   const calculateWeeklyActivity = (attendance: any[]) => {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -759,16 +761,16 @@ export default function AdminDashboardScreen() {
       ]}
     >
       <View style={[styles.carouselCardHeader, { backgroundColor: item.gradient[0] }]}>
-  <View style={styles.carouselHeaderContent}>
-    <View style={styles.carouselIconContainer}>
-      {item.icon}
-    </View>
-    <View style={styles.carouselHeaderText}>
-      <Text style={styles.carouselCardTitle}>{item.title}</Text>
-      <Text style={styles.carouselCardSubtitle}>{item.subtitle}</Text>
-    </View>
-  </View>
-</View>
+        <View style={styles.carouselHeaderContent}>
+          <View style={styles.carouselIconContainer}>
+            {item.icon}
+          </View>
+          <View style={styles.carouselHeaderText}>
+            <Text style={styles.carouselCardTitle}>{item.title}</Text>
+            <Text style={styles.carouselCardSubtitle}>{item.subtitle}</Text>
+          </View>
+        </View>
+      </View>
       <View style={styles.carouselCardBody}>
         {item.stats.map((stat, index) => (
           <View key={index} style={styles.carouselStatItem}>
@@ -1256,6 +1258,18 @@ export default function AdminDashboardScreen() {
     leaderboardScrollContainer: {
       maxHeight: 450,
     },
+    gymLogo: {
+      width: 64,
+      height: 64,
+      borderRadius: 50,
+    },
+    
+    fallbackText: {
+      color: '#FFFFFF',
+      fontSize: 18,
+      fontWeight: '700',
+    },
+    
   });
 
   if (isLoading && !refreshing) {
@@ -1287,8 +1301,19 @@ export default function AdminDashboardScreen() {
         <Animated.View style={[styles.header, { transform: [{ translateY: slideAnim }] }]}>
           <View style={styles.headerRow}>
             <View style={styles.gymIcon}>
-              <Building2 size={36} color="#FFFFFF" />
+              {gym?.logo_url ? (
+                <Image
+                  source={{ uri: gym.logo_url }}
+                  style={styles.gymLogo}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Text style={styles.fallbackText}>
+                  {gym?.name?.charAt(0).toUpperCase() || 'G'}
+                </Text>
+              )}
             </View>
+
             <View style={styles.headerTextContainer}>
               <Text style={styles.headerTitle}>{gym?.name || 'Elite Fitness Hub'}</Text>
               {gym?.location && (

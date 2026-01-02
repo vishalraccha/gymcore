@@ -20,8 +20,65 @@ import { Card } from '@/components/ui/Card';
 import { User, Building2, X } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
+import { supabase } from '@/lib/supabase';
 
 const { height } = Dimensions.get('window');
+
+const createGym = async (
+  gymDetails: {
+    name: string;
+    location: string;
+    phone: string;
+    description: string;
+  },
+  userId: string,
+  userEmail: string // ⭐ Pass email to save in gym
+) => {
+  console.log('🏋️ createGym called', { gymDetails, userId, userEmail });
+
+  try {
+    /* ------------------ 1️⃣ CREATE GYM WITH EMAIL ------------------ */
+    const { data: newGym, error: gymError } = await supabase
+      .from('gyms')
+      .insert({
+        name: gymDetails.name.trim(),
+        location: gymDetails.location || null,
+        phone: gymDetails.phone || null,
+        email: userEmail, // ⭐ ADD: Save email in gyms table
+        description: gymDetails.description || null,
+        owner_id: userId,
+      })
+      .select()
+      .single();
+
+    console.log('🏢 gym insert result:', { newGym, gymError });
+
+    if (gymError) throw gymError;
+    if (!newGym?.id) throw new Error('Gym not created');
+
+    /* ------------------ 2️⃣ UPDATE PROFILE WITH GYM ------------------ */
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({
+        gym_id: newGym.id,
+        role: 'gym_owner',
+        email: userEmail, // ⭐ Also update profile email
+      })
+      .eq('id', userId);
+
+    console.log('👤 profile update result:', profileError);
+
+    if (profileError) throw profileError;
+
+    console.log('✅ Gym + profile linked successfully');
+
+    return { success: true, gym: newGym };
+  } catch (error) {
+    console.error('❌ createGym FAILED:', error);
+    return { success: false, error };
+  }
+};
+
 
 export default function RegisterScreen() {
   const { theme } = useTheme();
@@ -40,7 +97,7 @@ export default function RegisterScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(50));
-  const { signUp } = useAuth();
+  const { signUp , refreshProfile, refreshGym} = useAuth();
 
   React.useEffect(() => {
     Animated.parallel([
@@ -176,6 +233,30 @@ export default function RegisterScreen() {
       color: theme.colors.primary,
       fontWeight: '600',
     },
+    gymPreview: {
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: theme.colors.primary + '15',
+      borderWidth: 1,
+      borderColor: theme.colors.primary + '30',
+      marginBottom: 16,
+    },
+    gymPreviewLabel: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.primary,
+      marginBottom: 4,
+    },
+    gymPreviewName: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    gymPreviewHint: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
     modalSafeArea: {
       flex: 1,
       backgroundColor: theme.colors.card,
@@ -225,45 +306,173 @@ export default function RegisterScreen() {
   });
 
   const handleRegister = async () => {
-    if (!email || !password || !fullName || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
-    }
+    console.log('🚀 handleRegister CALLED');
 
-    if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
-      return;
-    }
-
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
-      return;
-    }
-
-    if (selectedRole === 'gym_owner' && !gymDetails.name) {
-      Alert.alert('Error', 'Please provide gym details');
-      return;
-    }
-
-    setIsLoading(true);
-    
     try {
-      const { error } = await signUp(email, password, fullName, selectedRole);
-      
-      setIsLoading(false);
+      console.log('📩 Form values:', {
+        email,
+        fullName,
+        selectedRole,
+        hasGymDetails: !!gymDetails?.name,
+      });
 
-      if (error) {
-        Alert.alert('Registration Failed', error.message);
+      if (!email || !password || !fullName || !confirmPassword) {
+        console.warn('❌ Missing fields');
+        Alert.alert('Error', 'Please fill in all fields');
+        return;
       }
+
+      if (password !== confirmPassword) {
+        console.warn('❌ Password mismatch');
+        Alert.alert('Error', 'Passwords do not match');
+        return;
+      }
+
+      if (password.length < 6) {
+        console.warn('❌ Password too short');
+        Alert.alert('Error', 'Password must be at least 6 characters');
+        return;
+      }
+
+      if (selectedRole === 'gym_owner' && !gymDetails?.name) {
+        console.warn('❌ Gym owner without gym name');
+        Alert.alert('Error', 'Please provide gym details first');
+        setShowGymDetails(true);
+        return;
+      }
+
+      setIsLoading(true);
+      console.log('⏳ Starting signup...');
+
+      // Store email for later use
+      const userEmail = email.trim().toLowerCase();
+
+      // 🔐 Sign up
+      const { error: signUpError } = await signUp(
+        userEmail,
+        password,
+        fullName,
+        selectedRole
+      );
+
+      console.log('🧾 Signup response error:', signUpError);
+
+      if (signUpError) {
+        Alert.alert('Registration Failed', signUpError.message);
+        setIsLoading(false);
+        return;
+      }
+
+      // Get the user from Supabase auth after signup
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      console.log('👤 Current user after signup:', user?.id);
+
+      if (!user) {
+        Alert.alert('Error', 'Failed to get user information');
+        setIsLoading(false);
+        return;
+      }
+
+      // 🏋️ Gym owner flow
       if (selectedRole === 'gym_owner') {
-        router.replace('/(app)/admin');
+        console.log('🏋️ Creating gym for owner:', user.id);
+      
+        // Wait a bit for the auth to settle
+        await new Promise(resolve => setTimeout(resolve, 500));
+      
+        // ⭐ Pass email to createGym
+        const result = await createGym(gymDetails, user.id, userEmail);
+      
+        console.log('🏢 Gym creation result:', result);
+      
+        if (!result?.success) {
+          setIsLoading(false);
+          if (Platform.OS === 'web') {
+            if (window.confirm('Account created but gym setup failed. You can complete it later from your profile.\n\nClick OK to continue to dashboard.')) {
+              // ⭐ FIX: Refresh profile before redirect
+              await refreshProfile();
+              router.replace('/(app)/admin');
+            }
+          } else {
+            Alert.alert(
+              'Warning',
+              'Account created but gym setup failed. You can complete it later from your profile.',
+              [
+                { 
+                  text: 'OK', 
+                  onPress: async () => {
+                    // ⭐ FIX: Refresh profile before redirect
+                    await refreshProfile();
+                    router.replace('/(app)/admin');
+                  }
+                }
+              ]
+            );
+          }
+          return;
+        }
+      
+        // Clear gym details form
+        setGymDetails({
+          name: '',
+          location: '',
+          phone: '',
+          description: '',
+        });
+      
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await refreshProfile();
+        
+        // Wait a bit for database to settle
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await refreshGym();
+        
+        setIsLoading(false);
+        if (Platform.OS === 'web') {
+          alert('Account and gym created successfully! 🎉');
+          setTimeout(() => {
+            router.replace('/(app)/admin');
+          }, 500);
+        } else {
+          Alert.alert('Success', 'Account and gym created successfully! 🎉', [
+            { 
+              text: 'OK', 
+              onPress: () => {setTimeout(() => {
+                router.replace('/(app)/admin');
+              }, 300);}
+            }
+          ]);
+        }
       } else {
-        router.replace('/(app)/(tabs)');
+        // 👤 Normal member
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await refreshProfile();
+        setIsLoading(false);
+        
+        if (Platform.OS === 'web') {
+          alert('Account created successfully! 🎉');
+          setTimeout(() => {
+            router.replace('/(app)/(tabs)');
+          }, 300);
+        } else {
+          Alert.alert('Success', 'Account created successfully! 🎉', [
+            { 
+              text: 'OK', 
+              onPress: () => router.replace('/(app)/(tabs)')
+            }
+          ]);
+        }
       }
+
     } catch (err) {
+      console.error('🔥 handleRegister crashed:', err);
       setIsLoading(false);
-      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
-      Alert.alert('Error', errorMessage);
+      Alert.alert(
+        'Error',
+        err instanceof Error ? err.message : 'Unexpected error occurred'
+      );
     }
   };
 
@@ -275,7 +484,7 @@ export default function RegisterScreen() {
   };
 
   const handleGymDetailsContinue = () => {
-    if (!gymDetails.name) {
+    if (!gymDetails.name.trim()) {
       Alert.alert('Error', 'Please enter gym name');
       return;
     }
@@ -305,7 +514,7 @@ export default function RegisterScreen() {
           >
             {/* Header */}
             <View style={styles.header}>
-              <Text style={styles.title}>Join FitLife</Text>
+              <Text style={styles.title}>Join GymCore</Text>
               <Text style={styles.subtitle}>Create your account and start your fitness journey</Text>
             </View>
 
@@ -403,6 +612,19 @@ export default function RegisterScreen() {
                   textContentType="newPassword"
                 />
               </View>
+
+              {/* Gym Details Preview for Gym Owner */}
+              {selectedRole === 'gym_owner' && gymDetails.name && (
+                <TouchableOpacity
+                  style={styles.gymPreview}
+                  onPress={() => setShowGymDetails(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.gymPreviewLabel}>Gym Details Added ✓</Text>
+                  <Text style={styles.gymPreviewName}>{gymDetails.name}</Text>
+                  <Text style={styles.gymPreviewHint}>Tap to edit</Text>
+                </TouchableOpacity>
+              )}
 
               {/* Register Button */}
               <Button
@@ -505,7 +727,7 @@ export default function RegisterScreen() {
               </View>
 
               <Button
-                title="Continue Registration"
+                title="Save Gym Details"
                 onPress={handleGymDetailsContinue}
                 style={styles.continueButton}
               />

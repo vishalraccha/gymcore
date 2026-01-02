@@ -41,6 +41,7 @@ import {
 } from 'lucide-react-native';
 
 import { formatRupees } from '@/lib/currency';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 const showConfirm = (
   title: string,
@@ -89,19 +90,23 @@ interface MemberDetails extends Profile {
 
 export default function MembersScreen() {
   const { theme } = useTheme();
-  const { profile ,setIsCreatingMember} = useAuth();
+  const { profile, setIsCreatingMember } = useAuth();
   const [members, setMembers] = useState<MemberDetails[]>([]);
   const [filteredMembers, setFilteredMembers] = useState<MemberDetails[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddMember, setShowAddMember] = useState(false);
   const [showMemberDetails, setShowMemberDetails] = useState(false);
   const [selectedMember, setSelectedMember] = useState<MemberDetails | null>(null);
+  const [customStartDate, setCustomStartDate] = useState(new Date()); // Set to current date
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [newMember, setNewMember] = useState({
     full_name: '',
     email: '',
     phone: '',
     password: '123456',
     has_personal_training: false,
+    weight: '',
+    height: '',
   });
   const [availableSubscriptions, setAvailableSubscriptions] = useState<any[]>([]);
   const [selectedSubscription, setSelectedSubscription] = useState<any>(null);
@@ -469,215 +474,231 @@ export default function MembersScreen() {
   };
 
   // ============================================
-// FINAL CORRECTED addMember FUNCTION
-// Copy this entire function into your MembersScreen
-// ============================================
+  // FINAL CORRECTED addMember FUNCTION
+  // Copy this entire function into your MembersScreen
+  // ============================================
 
-const addMember = async () => {
-  if (!newMember.full_name || !newMember.email || !newMember.password) {
-    Alert.alert('Error', 'Please fill in all required fields');
-    return;
-  }
-
-  if (newMember.password.length < 6) {
-    Alert.alert('Error', 'Password must be at least 6 characters');
-    return;
-  }
-
-  if ((paymentMethod === 'cash' || paymentMethod === 'online') && selectedSubscription) {
-    if (!amountReceived || parseFloat(amountReceived) <= 0) {
-      Alert.alert('Error', 'Please enter amount received');
+  const addMember = async () => {
+    if (!newMember.full_name || !newMember.email || !newMember.password || !newMember.phone) {
+      Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
-    if (parseFloat(amountReceived) > selectedSubscription.price) {
-      Alert.alert('Error', 'Amount received cannot exceed plan price');
+
+    if (newMember.password.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters');
       return;
     }
-  }
-  setIsLoading(true);
-  setIsCreatingMember(true);
-  
-  try {
-    // Create user account
-    const { data: { session: adminSession } } = await supabase.auth.getSession();
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: newMember.email,
-      password: newMember.password,
-      options: {
-        emailRedirectTo: undefined,
-        data: {
-          full_name: newMember.full_name,
-          phone: newMember.phone || null,
-          role: 'member',
-          gym_id: profile?.gym_id ? String(profile.gym_id) : null,
-          has_personal_training: newMember.has_personal_training,
+
+    if ((paymentMethod === 'cash' || paymentMethod === 'online') && selectedSubscription) {
+      if (!amountReceived || parseFloat(amountReceived) <= 0) {
+        Alert.alert('Error', 'Please enter amount received');
+        return;
+      }
+      if (parseFloat(amountReceived) > selectedSubscription.price) {
+        Alert.alert('Error', 'Amount received cannot exceed plan price');
+        return;
+      }
+    }
+    setIsLoading(true);
+    setIsCreatingMember(true);
+
+    try {
+      // Create user account
+      const { data: { session: adminSession } } = await supabase.auth.getSession();
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: newMember.email,
+        password: newMember.password,
+        options: {
+          emailRedirectTo: undefined,
+          data: {
+            full_name: newMember.full_name,
+            phone: newMember.phone || null,
+            role: 'member',
+            gym_id: profile?.gym_id ? String(profile.gym_id) : null,
+            has_personal_training: newMember.has_personal_training,
+          },
         },
-      },
-    });
-
-    if (authError) throw authError;
-    if (!authData.user) throw new Error('Failed to create user');
-
-    
-
-    const userId = authData.user.id;
-    if (adminSession) {
-      await supabase.auth.setSession({
-        access_token: adminSession.access_token,
-        refresh_token: adminSession.refresh_token,
       });
 
-   }
-    // Wait for signOut to complete
-    await new Promise((resolve) => setTimeout(resolve, 500));
+      if (authError) throw authError;
+      if (!authData.user) throw new Error('Failed to create user');
 
-    // Handle personal training
-    if (newMember.has_personal_training && profile?.gym_id) {
-      await supabase
-        .from('profiles')
-        .update({ has_personal_training: true })
-        .eq('id', userId);
 
-      await supabase.from('personal_training_assignments').insert([{
-        user_id: userId,
-        gym_id: profile.gym_id,
-        assigned_by: profile.id,
-        is_active: true,
-        start_date: new Date().toISOString().split('T')[0],
-      }]);
-    }
 
-    // Handle subscription if selected
-    if ((paymentMethod === 'cash' || paymentMethod === 'online') && selectedSubscription) {
-      try {
-        const received = parseFloat(amountReceived);
-        const pending = Math.max(0, selectedSubscription.price - received);
-        const paymentStatus = pending === 0 ? 'completed' : 'partial';
+      const userId = authData.user.id;
+      if (newMember.weight || newMember.height) {
+        await supabase
+          .from('profiles')
+          .update({
+            weight: newMember.weight ? parseFloat(newMember.weight) : null,
+            height: newMember.height ? parseFloat(newMember.height) : null,
+          })
+          .eq('id', userId);
+      }
+      if (adminSession) {
+        await supabase.auth.setSession({
+          access_token: adminSession.access_token,
+          refresh_token: adminSession.refresh_token,
+        });
 
-        const startDate = new Date();
-        const endDate = new Date();
-        endDate.setDate(endDate.getDate() + (selectedSubscription.duration_days || selectedSubscription.duration_months * 30));
+      }
+      // Wait for signOut to complete
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
-        const { data: userSub, error: subError } = await supabase
-          .from('user_subscriptions')
-          .insert([{
-            user_id: userId,
-            subscription_id: selectedSubscription.id,
-            start_date: startDate.toISOString().split('T')[0],
-            end_date: endDate.toISOString().split('T')[0],
-            total_amount: selectedSubscription.price,
-            paid_amount: received,
-            amount_paid: received,
-            pending_amount: pending,
-            payment_status: paymentStatus,
-            payment_method: paymentMethod,
-            is_active: pending === 0,
-            currency: 'INR',
-            gym_id: profile?.gym_id,
-            created_by: profile?.id,
-            payment_notes: paymentNotes || null,
-            last_payment_date: received > 0 ? new Date().toISOString() : null,
-          }])
-          .select()
-          .single();
+      // Handle personal training
+      if (newMember.has_personal_training && profile?.gym_id) {
+        await supabase
+          .from('profiles')
+          .update({ has_personal_training: true })
+          .eq('id', userId);
 
-        if (subError) throw subError;
+        await supabase.from('personal_training_assignments').insert([{
+          user_id: userId,
+          gym_id: profile.gym_id,
+          assigned_by: profile.id,
+          is_active: true,
+          start_date: new Date().toISOString().split('T')[0],
+        }]);
+      }
 
-        if (received > 0) {
-          const receiptNum = receiptNumber || `REC-${Date.now()}`;
+      // Handle subscription if selected
+      if ((paymentMethod === 'cash' || paymentMethod === 'online') && selectedSubscription) {
+        try {
+          const received = parseFloat(amountReceived);
+          const pending = Math.max(0, selectedSubscription.price - received);
+          const paymentStatus = pending === 0 ? 'completed' : 'partial';
 
-          const { data: payment, error: paymentError } = await supabase
-            .from('cash_payments')
+          // Use selected date (default is today)
+          const startDate = new Date(customStartDate);
+          startDate.setHours(0, 0, 0, 0); // Reset time to midnight
+
+          const endDate = new Date(startDate);
+          endDate.setDate(endDate.getDate() + (selectedSubscription.duration_days || selectedSubscription.duration_months * 30));
+
+          const { data: userSub, error: subError } = await supabase
+            .from('user_subscriptions')
             .insert([{
               user_id: userId,
-              gym_id: profile?.gym_id,
-              amount: received,
+              subscription_id: selectedSubscription.id,
+              start_date: startDate.toISOString().split('T')[0],
+              end_date: endDate.toISOString().split('T')[0],
+              custom_start_date: customStartDate.toISOString().split('T')[0],
+              total_amount: selectedSubscription.price,
+              paid_amount: received,
+              amount_paid: received,
+              pending_amount: pending,
+              payment_status: paymentStatus,
+              payment_method: paymentMethod,
+              is_active: true,
               currency: 'INR',
-              receipt_number: receiptNum,
-              payment_date: new Date().toISOString(),
-              received_by: profile?.id,
-              notes: paymentNotes || `Initial payment for ${selectedSubscription.name}`,
+              gym_id: profile?.gym_id,
+              created_by: profile?.id,
+              payment_notes: paymentNotes || null,
+              last_payment_date: received > 0 ? new Date().toISOString() : null,
             }])
             .select()
             .single();
 
-          if (paymentError) throw paymentError;
+          if (subError) throw subError;
+          if (received > 0) {
+            const receiptNum = receiptNumber || `REC-${Date.now()}`;
 
-          const { error: invoiceError } = await supabase.from('invoices').insert([{
-            invoice_number: `INV-${Date.now()}`,
-            user_id: userId,
-            gym_id: profile?.gym_id,
-            subscription_id: userSub.id,
-            payment_type: paymentMethod,
-            amount: selectedSubscription.price,
-            currency: 'INR',
-            tax_amount: 0,
-            total_amount: selectedSubscription.price,
-            remaining_amount: pending,
-            payment_status: paymentStatus,
-            invoice_date: new Date().toISOString(),
-            payment_id: payment.id,
-            items: JSON.stringify([{
-              description: `${selectedSubscription.name} - New Subscription`,
-              quantity: 1,
-              rate: selectedSubscription.price,
+            const { data: payment, error: paymentError } = await supabase
+              .from('cash_payments')
+              .insert([{
+                user_id: userId,
+                gym_id: profile?.gym_id,
+                amount: received,
+                currency: 'INR',
+                receipt_number: receiptNum,
+                payment_date: new Date().toISOString(),
+                received_by: profile?.id,
+                notes: paymentNotes || `Initial payment for ${selectedSubscription.name}`,
+              }])
+              .select()
+              .single();
+
+            if (paymentError) throw paymentError;
+
+            const { error: invoiceError } = await supabase.from('invoices').insert([{
+              invoice_number: `INV-${Date.now()}`,
+              user_id: userId,
+              gym_id: profile?.gym_id,
+              subscription_id: userSub.id,
+              payment_type: paymentMethod,
               amount: selectedSubscription.price,
-            }]),
-          }]);
+              currency: 'INR',
+              tax_amount: 0,
+              total_amount: selectedSubscription.price,
+              remaining_amount: pending,
+              payment_status: paymentStatus,
+              invoice_date: new Date().toISOString(),
+              payment_id: payment.id,
+              items: JSON.stringify([{
+                description: `${selectedSubscription.name} - New Subscription`,
+                quantity: 1,
+                rate: selectedSubscription.price,
+                amount: selectedSubscription.price,
+              }]),
+            }]);
 
-          if (invoiceError) {
-            console.error('Invoice creation error:', invoiceError);
+            if (invoiceError) {
+              console.error('Invoice creation error:', invoiceError);
+            }
           }
+        } catch (subError) {
+          console.error('Error creating subscription:', subError);
+          Alert.alert('Warning', 'Member created but subscription setup failed.');
         }
-      } catch (subError) {
-        console.error('Error creating subscription:', subError);
-        Alert.alert('Warning', 'Member created but subscription setup failed.');
       }
-    }
 
-    const addedMemberName = newMember.full_name;
+      const addedMemberName = newMember.full_name;
 
-    // Close modal
-    setShowAddMember(false);
+      // Close modal
+      setShowAddMember(false);
 
-    // Reset form
-    setNewMember({
-      full_name: '',
-      email: '',
-      phone: '',
-      password: '',
-      has_personal_training: false,
-    });
-    setSelectedSubscription(null);
-    setPaymentMethod('none');
-    setAmountReceived('');
-    setReceiptNumber('');
-    setPaymentNotes('');
+      // Reset form
+      setNewMember({
+        full_name: '',
+        email: '',
+        phone: '',
+        password: '',
+        has_personal_training: false,
+        weight: '', // NEW
+        height: '', // NEW
+      });
+      setSelectedSubscription(null);
+      setPaymentMethod('none');
+      setAmountReceived('');
+      setReceiptNumber('');
+      setPaymentNotes('');
+      setCustomStartDate(new Date());
+      setShowDatePicker(false);
 
-    // Refresh member list
-    await fetchMembers();
+      // Refresh member list
+      await fetchMembers();
 
-    // Show success
-    setTimeout(() => {
-      if (Platform.OS === 'web') {
-        window.alert(`Success\n\n${addedMemberName} added successfully!`);
+      // Show success
+      setTimeout(() => {
+        if (Platform.OS === 'web') {
+          window.alert(`Success\n\n${addedMemberName} added successfully!`);
+        } else {
+          Alert.alert('Success', `${addedMemberName} added successfully!`);
+        }
+      }, 300);
+
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to add member';
+      if (errorMessage.includes('already registered')) {
+        Alert.alert('Error', 'This email is already registered');
       } else {
-        Alert.alert('Success', `${addedMemberName} added successfully!`);
+        Alert.alert('Error', errorMessage);
       }
-    }, 300);
-
-  } catch (error: any) {
-    const errorMessage = error?.message || 'Failed to add member';
-    if (errorMessage.includes('already registered')) {
-      Alert.alert('Error', 'This email is already registered');
-    } else {
-      Alert.alert('Error', errorMessage);
+    } finally {
+      setIsLoading(false);
+      setIsCreatingMember(false);
     }
-  } finally {
-    setIsLoading(false);
-    setIsCreatingMember(false);
-  }
-};
+  };
 
   const deleteMember = async (memberId: string, memberName: string) => {
     showConfirm(
@@ -686,14 +707,14 @@ const addMember = async () => {
       async () => {
         try {
           setIsLoading(true);
-  
-          const { error: rpcError } = await supabase.rpc('delete_user', { 
-            user_id: memberId 
+
+          const { error: rpcError } = await supabase.rpc('delete_user', {
+            user_id: memberId
           });
-  
+
           if (rpcError) {
             console.log('RPC failed, manual delete...', rpcError);
-            
+
             await supabase.from('attendance').delete().eq('user_id', memberId);
             await supabase.from('workout_logs').delete().eq('user_id', memberId);
             await supabase.from('diet_logs').delete().eq('user_id', memberId);
@@ -701,20 +722,20 @@ const addMember = async () => {
             await supabase.from('invoices').delete().eq('user_id', memberId);
             await supabase.from('user_subscriptions').delete().eq('user_id', memberId);
             await supabase.from('personal_training_assignments').delete().eq('user_id', memberId);
-            
+
             const { error: profileError } = await supabase
               .from('profiles')
               .delete()
               .eq('id', memberId);
-              
+
             if (profileError) throw profileError;
           }
-  
+
           setShowMemberDetails(false);
           await fetchMembers();
-          
+
           showAlert('Success', `${memberName} deleted successfully`);
-          
+
         } catch (error: any) {
           console.error('Delete error:', error);
           showAlert('Error', error.message || 'Failed to delete member');
@@ -926,7 +947,7 @@ const addMember = async () => {
           pending_amount: pending,
           payment_status: paymentStatus,
           payment_method: renewPaymentMethod,
-          is_active: pending === 0, // Only active if fully paid
+          is_active: true, // Only active if fully paid
           currency: 'INR',
           gym_id: profile?.gym_id,
           created_by: profile?.id,
@@ -1169,8 +1190,8 @@ const addMember = async () => {
       fontSize: 12,
       color: theme.colors.warning,
     },
-    
-    
+
+
     fab: {
       position: 'absolute',
       bottom: 24 + 70,
@@ -1334,6 +1355,15 @@ const addMember = async () => {
       fontSize: 14,
       color: theme.colors.textSecondary,
     },
+    height: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+    },
+    weight: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+    },
+
     overviewStreak: {
       fontSize: 14,
       color: theme.colors.warning,
@@ -1561,11 +1591,40 @@ const addMember = async () => {
       textAlign: 'center',
       paddingVertical: 20,
     },
+    datePickerButton: {
+      justifyContent: 'center',
+      paddingVertical: 16,
+    },
+    datePickerContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    datePickerText: {
+      fontSize: 16,
+      color: theme.colors.text,
+      fontFamily: 'Inter-Regular',
+    },
     dangerCard: {
       marginBottom: 24,
       padding: 20,
       borderColor: theme.colors.error + '30',
       borderWidth: 1,
+    },
+    contactRow: {
+      gap: 8,
+      marginBottom: 8,
+    },
+    contactItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    contactText: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      fontFamily: 'Inter-Regular',
+      flex: 1,
     },
     dangerTitle: {
       fontSize: 16,
@@ -1602,7 +1661,7 @@ const addMember = async () => {
     },
     addButton: {
       marginTop: 8,
-      marginBottom:10,
+      marginBottom: 10,
       minHeight: 52,
     },
     filterTabs: {
@@ -2122,88 +2181,93 @@ const addMember = async () => {
           ) : (
             filteredMembers.map((member) => (
               <TouchableOpacity
-              style={styles.viewButton}
-              onPress={() => fetchMemberDetails(member.id)}
-              activeOpacity={0.7}
-            >
-              <Card key={member.id} style={styles.memberCard}>
-                <View style={styles.memberInfo}>
-                  <View style={styles.memberAvatar}>
-                    <User size={24} color="#FFFFFF" />
-                  </View>
-                  <View style={styles.memberDetails}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <Text style={styles.memberName}>{member.full_name}</Text>
-                      {member.subscriptionStatus === 'active' && (
-                        <View style={styles.activeBadge}>
-                          <CheckCircle size={12} color={theme.colors.success} />
-                          <Text style={styles.activeBadgeText}>Active</Text>
+                style={styles.viewButton}
+                onPress={() => fetchMemberDetails(member.id)}
+                activeOpacity={0.7}
+              >
+                <Card key={member.id} style={styles.memberCard}>
+                  <View style={styles.memberInfo}>
+                    <View style={styles.memberAvatar}>
+                      <User size={24} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.memberDetails}>
+                      {/* Name and Status Badges */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <Text style={styles.memberName}>{member.full_name}</Text>
+                        {member.subscriptionStatus === 'active' && (
+                          <View style={styles.activeBadge}>
+                            <CheckCircle size={12} color={theme.colors.success} />
+                            <Text style={styles.activeBadgeText}>Active</Text>
+                          </View>
+                        )}
+                        {member.subscriptionStatus === 'expired' && (
+                          <View style={styles.expiredBadge}>
+                            <AlertCircle size={12} color={theme.colors.error} />
+                            <Text style={styles.expiredBadgeText}>Expired</Text>
+                          </View>
+                        )}
+                        {member.subscriptionStatus === 'none' && (
+                          <View style={[styles.expiredBadge, { backgroundColor: theme.colors.warning + '20' }]}>
+                            <AlertCircle size={12} color={theme.colors.warning} />
+                            <Text style={[styles.expiredBadgeText, { color: theme.colors.warning }]}>No Plan</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Contact Info */}
+                      <View style={styles.contactRow}>
+                        <View style={styles.contactItem}>
+                          <Mail size={14} color={theme.colors.textSecondary} />
+                          <Text style={styles.contactText} numberOfLines={1}>{member.email}</Text>
                         </View>
-                      )}
-                      {member.subscriptionStatus === 'expired' && (
-                        <View style={styles.expiredBadge}>
-                          <AlertCircle size={12} color={theme.colors.error} />
-                          <Text style={styles.expiredBadgeText}>Expired</Text>
-                        </View>
-                      )}
-                      {member.subscriptionStatus === 'none' && (
-                        <View style={[styles.expiredBadge, { backgroundColor: theme.colors.warning + '20' }]}>
-                          <AlertCircle size={12} color={theme.colors.warning} />
-                          <Text style={[styles.expiredBadgeText, { color: theme.colors.warning }]}>No Plan</Text>
+                        {member.phone && (
+                          <View style={styles.contactItem}>
+                            <Phone size={14} color={theme.colors.textSecondary} />
+                            <Text style={styles.contactText}>{member.phone}</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Subscription Details */}
+                      {member.currentSubscription && (
+                        <View style={styles.subscriptionDetails}>
+                          <Text style={styles.subscriptionPlanName}>
+                            {member.currentSubscription.subscription?.name || 'Plan'}
+                          </Text>
+                          <View style={styles.subscriptionDates}>
+                            <Text style={styles.subscriptionDate}>
+                              Start: {new Date(member.currentSubscription.start_date).toLocaleDateString()}
+                            </Text>
+                            <Text style={styles.subscriptionDate}>
+                              End: {new Date(member.currentSubscription.end_date).toLocaleDateString()}
+                            </Text>
+                          </View>
+
+                          <View style={styles.paymentInfo}>
+                            <Text style={styles.paymentLabel}>
+                              Paid: {formatRupees(member.currentSubscription.paid_amount || 0)}
+                            </Text>
+                            {(member.currentSubscription.pending_amount || 0) > 0 && (
+                              <Text style={styles.pendingAmount}>
+                                Pending: {formatRupees(member.currentSubscription.pending_amount)}
+                              </Text>
+                            )}
+                            {member.currentSubscription.payment_status === 'completed' && (
+                              <View style={styles.paidBadge}>
+                                <Text style={styles.paidBadgeText}>Fully Paid</Text>
+                              </View>
+                            )}
+                            {member.currentSubscription.payment_status === 'partial' && (
+                              <View style={styles.partialBadge}>
+                                <Text style={styles.partialBadgeText}>Partial</Text>
+                              </View>
+                            )}
+                          </View>
                         </View>
                       )}
                     </View>
-
-                   
-
-                   
-
-                    {member.currentSubscription && (
-                      <View style={styles.subscriptionDetails}>
-                        <Text style={styles.subscriptionPlanName}>
-                          {member.currentSubscription.subscription?.name || 'Plan'}
-                        </Text>
-                        <View style={styles.subscriptionDates}>
-                          <Text style={styles.subscriptionDate}>
-                            Start: {new Date(member.currentSubscription.start_date).toLocaleDateString()}
-                          </Text>
-                          <Text style={styles.subscriptionDate}>
-                            End: {new Date(member.currentSubscription.end_date).toLocaleDateString()}
-                          </Text>
-                        </View>
-
-                        <View style={styles.paymentInfo}>
-                          <Text style={styles.paymentLabel}>
-                            Paid: {formatRupees(member.currentSubscription.paid_amount || 0)}
-                          </Text>
-                          {(member.currentSubscription.pending_amount || 0) > 0 && (
-                            <Text style={styles.pendingAmount}>
-                              Pending: {formatRupees(member.currentSubscription.pending_amount)}
-                            </Text>
-                          )}
-                          {member.currentSubscription.payment_status === 'completed' && (
-                            <View style={styles.paidBadge}>
-                              <Text style={styles.paidBadgeText}>Fully Paid</Text>
-                            </View>
-                          )}
-                          {member.currentSubscription.payment_status === 'partial' && (
-                            <View style={styles.partialBadge}>
-                              <Text style={styles.partialBadgeText}>Partial</Text>
-                            </View>
-                          )}
-                        </View>
-                      </View>
-                    )}
-
-                    
-
-                    
                   </View>
-
-                 
-                  
-                </View>
-              </Card>
+                </Card>
               </TouchableOpacity>
             ))
           )}
@@ -2273,31 +2337,87 @@ const addMember = async () => {
                 </View>
 
                 <View style={styles.inputGroup}>
-  <Text style={styles.inputLabel}>Password *</Text>
-  <View style={styles.passwordContainer}>
-    <TextInput
-      style={[styles.input, styles.passwordInput]}
-      placeholder="Min 6 characters"
-      placeholderTextColor={theme.colors.textSecondary}
-      value={newMember.password}
-      onChangeText={(text) => setNewMember({ ...newMember, password: text })}
-      secureTextEntry={!showPassword}
-    />
-    <TouchableOpacity
-      style={styles.eyeIcon}
-      onPress={() => setShowPassword(!showPassword)}
-    >
-      <Ionicons
-        name={showPassword ? "eye-off-outline" : "eye-outline"}
-        size={24}
-        color={theme.colors.textSecondary}
-      />
-    </TouchableOpacity>
-  </View>
-  <Text style={styles.helperText}>
-    Member will use this email and password to login.
-  </Text>
-</View>
+                  <Text style={styles.inputLabel}>Password *</Text>
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={[styles.input, styles.passwordInput]}
+                      placeholder="Min 6 characters"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={newMember.password}
+                      onChangeText={(text) => setNewMember({ ...newMember, password: text })}
+                      secureTextEntry={!showPassword}
+                    />
+                    <TouchableOpacity
+                      style={styles.eyeIcon}
+                      onPress={() => setShowPassword(!showPassword)}
+                    >
+                      <Ionicons
+                        name={showPassword ? "eye-off-outline" : "eye-outline"}
+                        size={24}
+                        color={theme.colors.textSecondary}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.helperText}>
+                    Member will use this email and password to login.
+                  </Text>
+
+                </View>
+
+                {/* Personal Training Toggle */}
+                <View style={styles.inputGroup}>
+                  <View style={styles.toggleContainer}>
+                    <View>
+                      <Text style={styles.toggleLabel}>Personal Training</Text>
+                      <Text style={styles.helperText}>
+                        Enable custom diet plans for this member
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[
+                        styles.toggleSwitch,
+                        newMember.has_personal_training && styles.toggleSwitchActive,
+                      ]}
+                      onPress={() => setNewMember({ ...newMember, has_personal_training: !newMember.has_personal_training })}
+                    >
+                      <View
+                        style={[
+                          styles.toggleThumb,
+                          newMember.has_personal_training && styles.toggleThumbActive,
+                        ]}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Weight and Height (Optional) */}
+                <View style={styles.inputRow}>
+                  <View style={styles.inputHalf}>
+                    <Text style={styles.inputLabel}>Weight (kg)</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="e.g., 70"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={newMember.weight}
+                      onChangeText={(text) => setNewMember({ ...newMember, weight: text })}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+
+                  <View style={styles.inputHalf}>
+                    <Text style={styles.inputLabel}>Height (cm)</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="e.g., 175"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={newMember.height}
+                      onChangeText={(text) => setNewMember({ ...newMember, height: text })}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.sectionDivider} />
 
                 <View style={styles.sectionDivider} />
 
@@ -2352,7 +2472,46 @@ const addMember = async () => {
                         </TouchableOpacity>
                       ))}
                     </ScrollView>
+                    {/* Custom Start Date with DatePicker */}
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.inputLabel}>Subscription Start Date</Text>
 
+                      <TouchableOpacity
+                        style={[styles.input, styles.datePickerButton]}
+                        onPress={() => setShowDatePicker(true)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.datePickerContent}>
+                          <Calendar size={20} color={theme.colors.textSecondary} />
+                          <Text style={styles.datePickerText}>
+                            {customStartDate.toLocaleDateString('en-IN', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric'
+                            })}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      {showDatePicker && (
+                        <DateTimePicker
+                          value={customStartDate}
+                          mode="date"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          onChange={(event, selectedDate) => {
+                            setShowDatePicker(Platform.OS === 'ios'); // Keep open on iOS
+                            if (selectedDate) {
+                              setCustomStartDate(selectedDate);
+                            }
+                          }}
+                          minimumDate={new Date(2020, 0, 1)} // Can't go before 2020
+                        />
+                      )}
+
+                      <Text style={styles.helperText}>
+                        Set a past date if member joined earlier. Default is today.
+                      </Text>
+                    </View>
                     {selectedSubscription && (
                       <>
                         <Text style={styles.inputLabel}>Payment Method</Text>
@@ -2925,6 +3084,11 @@ const addMember = async () => {
                             <Text style={styles.overviewLevel}>Level {selectedMember.level}</Text>
                             <Text style={styles.overviewPoints}>{selectedMember.total_points} XP</Text>
                             <Text style={styles.overviewStreak}>{selectedMember.current_streak} day streak</Text>
+                          </View>
+                          <View style={styles.overviewStats}>
+
+                            <Text style={styles.height}>Height {selectedMember.height || 0}</Text>
+                            <Text style={styles.weight}>weight {selectedMember.weight || 0}</Text>
                           </View>
                         </View>
                       </View>

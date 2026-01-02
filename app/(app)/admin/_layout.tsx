@@ -9,19 +9,54 @@ import { Settings, Users, BarChart2, FileText, Home, UserCheck,Dumbbell } from "
 
 
 export default function AdminTabsLayout() {
-  const { profile, isLoading } = useAuth();
+  const { user, profile, gym, refreshProfile, refreshGym, isLoading } = useAuth();
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const redirected = useRef(false);
+  const hasRefreshed = useRef(false);
+  const previousUserId = useRef<string | null>(null);
+
+  
+
 
   useEffect(() => {
-    if (isLoading || redirected.current) return;
+    const shouldRefresh = 
+      user?.id && 
+      profile?.role === 'gym_owner' && 
+      user.id !== previousUserId.current;
+
+
+      if (isLoading || redirected.current) return;
 
     if (!profile || !["admin", "gym_owner"].includes(profile.role || "")) {
       redirected.current = true;
       router.replace("/(app)/(tabs)"); // send non-admin back to app tabs
     }
-  }, [profile, isLoading]);
+
+
+    if (shouldRefresh && !hasRefreshed.current) {
+      console.log('🔄 Admin layout detected new user - refreshing data');
+      
+      const doRefresh = async () => {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for DB
+        await refreshProfile();
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await refreshGym();
+        hasRefreshed.current = true;
+      };
+
+      doRefresh();
+      previousUserId.current = user.id;
+    }
+    }, [user?.id, profile?.role, profile?.gym_id, refreshProfile, refreshGym, isLoading]);
+
+  // Reset flag when user changes
+  useEffect(() => {
+    if (user?.id !== previousUserId.current) {
+      hasRefreshed.current = false;
+    }
+  }, [user?.id]);
+
 
   if (isLoading) {
     return (

@@ -19,8 +19,41 @@ interface Gym {
   email?: string;
   description?: string;
   logo_url?: string;
+  owner_id?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+interface OwnerSubscriptionPlan {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  currency: string;
+  billing_cycle: 'monthly' | 'quarterly' | 'yearly';
+  duration_days: number;
+  member_limit?: number;
+  trainer_limit?: number;
+  features: string[];
+  trial_days: number;
+  is_active: boolean;
+}
+
+interface OwnerSubscription {
+  id: string;
+  owner_id: string;
+  gym_id: string;
+  plan_id: string;
+  status: 'pending' | 'active' | 'expired' | 'cancelled' | 'suspended' | 'trial';
+  start_date: string;
+  end_date: string;
+  payment_status: 'pending' | 'success' | 'failed' | 'refunded';
+  amount_paid: number;
+  auto_renew: boolean;
+  razorpay_subscription_id?: string;
+  razorpay_order_id?: string;
+  razorpay_payment_id?: string;
+  plan?: OwnerSubscriptionPlan;
 }
 
 interface AuthContextType {
@@ -28,6 +61,7 @@ interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   gym: Gym | null;
+  ownerSubscription: OwnerSubscription | null;
   isLoading: boolean;
   signIn: (email: string, password: string, role?: string) => Promise<{ error: Error | null }>;
   signUp: (
@@ -39,8 +73,10 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   refreshGym: () => Promise<void>;
-  isCreatingMember: boolean; // ⭐ NEW: Flag to prevent navigation during member creation
-  setIsCreatingMember: (value: boolean) => void; // ⭐ NEW: Setter for the flag
+  refreshOwnerSubscription: () => Promise<void>;
+  isCreatingMember: boolean;
+  setIsCreatingMember: (value: boolean) => void;
+  forceRefresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -50,15 +86,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [gym, setGym] = useState<Gym | null>(null);
+  const [ownerSubscription, setOwnerSubscription] = useState<OwnerSubscription | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isCreatingMember, setIsCreatingMember] = useState(false); // ⭐ NEW
+  const [isCreatingMember, setIsCreatingMember] = useState(false);
 
-  // fetch gym by id
-  const fetchGym = useCallback(async (gymId: string) => {
+  // Fetch gym by id with security validation
+  const fetchGym = useCallback(async (gymId: string, userId: string) => {
     try {
-      const { data, error } = await supabase
+      const { data: gymData, error } = await supabase
         .from("gyms")
-        .select("*")
+        .select(`
+          *,
+          owner_id
+        `)
         .eq("id", gymId)
         .single();
 
@@ -67,14 +107,74 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setGym(null);
         return;
       }
-      setGym(data as Gym);
+
+      // Security check: Only allow access if user is owner or member of this gym
+      const isOwner = gymData.owner_id === userId;
+      
+      // Also check if user is a member of this gym
+      const { data: memberCheck } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("id", userId)
+        .eq("gym_id", gymId)
+        .single();
+      
+      const isMember = !!memberCheck;
+      
+      if (!isOwner && !isMember) {
+        console.warn("🚨 Security: User trying to access unauthorized gym");
+        setGym(null);
+        return;
+      }
+
+      setGym(gymData as Gym);
     } catch (e) {
       console.log("fetchGym exception:", e);
       setGym(null);
     }
   }, []);
 
-  // fetch profile (and gym if linked)
+  // Fetch owner's subscription (only for gym_owner role)
+  const fetchOwnerSubscription = useCallback(async (ownerId: string, gymId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("owner_subscriptions")
+        .select(`
+          *,
+          plan:plan_id(*)
+        `)
+        .eq("owner_id", ownerId)
+        .eq("gym_id", gymId)
+        .in("status", ["active", "trial", "pending"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // No subscription found - this is okay
+        } else {
+          console.log("fetchOwnerSubscription error:", error);
+        }
+        setOwnerSubscription(null);
+        return;
+      }
+
+      // Security: Verify this is actually the owner
+      if (data.owner_id !== ownerId) {
+        console.warn("🚨 Security: Owner subscription mismatch");
+        setOwnerSubscription(null);
+        return;
+      }
+
+      setOwnerSubscription(data as OwnerSubscription);
+    } catch (e) {
+      console.log("fetchOwnerSubscription exception:", e);
+      setOwnerSubscription(null);
+    }
+  }, []);
+
+  // Fetch profile with role-based security
   const fetchProfile = useCallback(
     async (userId: string) => {
       try {
@@ -89,31 +189,85 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setProfile(null);
           return;
         }
-        setProfile(data as Profile);
 
-        // if profile has gym_id fetch gym
         const profileData = data as Profile;
+        
+        // Security: Validate gym ownership for gym_owner role
+        if (profileData.role === 'gym_owner' && profileData.gym_id) {
+          const { data: gymData } = await supabase
+            .from("gyms")
+            .select("owner_id")
+            .eq("id", profileData.gym_id)
+            .single();
+            
+          if (gymData?.owner_id !== userId) {
+            console.warn("🚨 Security: gym_owner role mismatch with gym ownership");
+            setProfile({ ...profileData, gym_id: null });
+            setGym(null);
+            setOwnerSubscription(null);
+            return;
+          }
+        }
+
+        setProfile(profileData);
+
+        // Fetch gym with security validation
         if (profileData?.gym_id) {
-          await fetchGym(profileData.gym_id);
+          await fetchGym(profileData.gym_id, userId);
+          
+          // Fetch owner subscription if gym owner
+          if (profileData.role === 'gym_owner') {
+            await fetchOwnerSubscription(userId, profileData.gym_id);
+          }
         } else {
           setGym(null);
+          setOwnerSubscription(null);
         }
       } catch (err) {
         console.log("fetchProfile exception:", err);
         setProfile(null);
         setGym(null);
+        setOwnerSubscription(null);
       }
     },
-    [fetchGym]
+    [fetchGym, fetchOwnerSubscription]
   );
 
   const refreshProfile = async () => {
-    if (user) await fetchProfile(user.id);
+    if (user) {
+      await fetchProfile(user.id);
+    }
   };
 
   const refreshGym = async () => {
-    if (profile?.gym_id) {
-      await fetchGym(profile.gym_id);
+    if (!user?.id) return;
+    
+    // ⭐ FIX: Find gym by owner_id instead of relying on profile.gym_id
+    try {
+      const { data: gymData } = await supabase
+        .from('gyms')
+        .select('*')
+        .eq('owner_id', user.id)
+        .single();
+      
+      if (gymData) {
+        setGym(gymData);
+      }
+    } catch (error) {
+      console.log('refreshGym error:', error);
+    }
+  };
+
+  const refreshOwnerSubscription = async () => {
+    if (user?.id && profile?.gym_id && profile?.role === 'gym_owner') {
+      await fetchOwnerSubscription(user.id, profile.gym_id);
+    }
+  };
+
+  // Force complete data refresh
+  const forceRefresh = async () => {
+    if (user) {
+      await fetchProfile(user.id);
     }
   };
 
@@ -125,15 +279,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     (async () => {
       try {
-        // Set timeout fallback to ensure loading always resolves quickly
         timeoutId = setTimeout(() => {
           if (mounted) {
-            console.log("⏱️ Auth loading timeout - forcing completion");
             setIsLoading(false);
           }
-        }, 2000) as ReturnType<typeof setTimeout>; // 2 second max timeout for faster loading
+        }, 2000) as ReturnType<typeof setTimeout>;
 
-        // Get initial session
         const {
           data: { session },
           error: sessionError,
@@ -141,10 +292,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         if (!mounted) return;
         
-        // Handle refresh token errors gracefully
         if (sessionError) {
-          console.log("Session error (may be expired):", sessionError.message);
-          // If refresh token is invalid, clear session but don't crash
+          console.log("Session error:", sessionError.message);
           if (sessionError.message?.includes('refresh') || sessionError.message?.includes('token')) {
             try {
               await supabase.auth.signOut();
@@ -155,6 +304,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(null);
             setProfile(null);
             setGym(null);
+            setOwnerSubscription(null);
             setIsLoading(false);
             return;
           }
@@ -163,8 +313,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(session);
         setUser(session?.user ?? null);
         
-        // Fetch profile BEFORE setting isLoading to false
-        // This ensures profile is available for routing decisions
         if (session?.user) {
           try {
             await fetchProfile(session.user.id);
@@ -182,41 +330,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })();
 
-    // Single auth state change listener
+    // Auth state change listener
     const { data: authListenerData } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
         if (!mounted) return;
-        
-        console.log("Auth event:", event);
 
-        // ⭐ NEW: Skip processing if we're creating a member
-        // This prevents navigation when admin creates a new member
+        // Skip processing if we're creating a member
         if (isCreatingMember) {
-          console.log("🚫 Ignoring auth change - currently creating member");
           return;
         }
 
-        // Handle token refresh failures gracefully
+        // Handle sign out
         if (event === "SIGNED_OUT" || (event as string) === "TOKEN_REFRESH_FAILED") {
-          console.warn("Auth session ended");
           setSession(null);
           setUser(null);
           setProfile(null);
           setGym(null);
+          setOwnerSubscription(null);
           return;
         }
 
-        setSession(newSession);
-        setUser(newSession?.user ?? null);
-        
-        if (newSession?.user) {
-          // Fetch profile when session changes (e.g., after login)
-          fetchProfile(newSession.user.id).catch((err) => {
-            console.log("Profile fetch error:", err);
-          });
-        } else {
+        // Only update if session actually changed (different user)
+        const currentUserId = user?.id;
+        const newUserId = newSession?.user?.id;
+
+        if (newUserId && newUserId !== currentUserId) {
+          // Different user logged in - clear and reload
+          setSession(newSession);
+          setUser(newSession.user);
           setProfile(null);
           setGym(null);
+          setOwnerSubscription(null);
+          
+          await fetchProfile(newUserId);
+        } else if (newSession) {
+          // Same user, just update session
+          setSession(newSession);
+          setUser(newSession.user);
         }
       }
     );
@@ -233,7 +383,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     };
-  }, [isCreatingMember,fetchProfile]); // ⭐ MODIFIED: Added isCreatingMember as dependency
+  }, [isCreatingMember, fetchProfile, user?.id]);
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -275,7 +425,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setProfile(null);
       setGym(null);
-      // redirect to auth route
+      setOwnerSubscription(null);
       router.replace("/(auth)/login");
     } catch (err) {
       console.log("signOut error:", err);
@@ -289,14 +439,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         profile,
         gym,
+        ownerSubscription,
         isLoading,
         signIn,
         signUp,
         signOut,
         refreshProfile,
         refreshGym,
-        isCreatingMember, // ⭐ NEW
-        setIsCreatingMember, // ⭐ NEW
+        refreshOwnerSubscription,
+        isCreatingMember,
+        setIsCreatingMember,
+        forceRefresh,
       }}
     >
       {children}

@@ -776,7 +776,7 @@ export default function ProfileScreen() {
         <InvoicesList userId={profile!.id} onRefresh={loadInvoices} />
 
         {/* Achievements */}
-        <View style={styles.section}>
+        {/* <View style={styles.section}>
           <Text style={styles.sectionTitle}>Achievements</Text>
           <View style={styles.statsGrid}>
             <StatItem
@@ -804,7 +804,7 @@ export default function ProfileScreen() {
               color={theme.colors.accent + '20'}
             />
           </View>
-        </View>
+        </View> */}
 
         {/* Preferences */}
         <Card style={styles.menuCard}>

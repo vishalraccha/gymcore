@@ -665,7 +665,7 @@ export default function DietScreen() {
         </View> */}
 
           {/* Nutrition Overview */}
-          <Card style={styles.overviewCard}>
+          {/* <Card style={styles.overviewCard}>
             <View style={styles.overviewHeader}>
               <Target size={24} color={theme.colors.primary} />
               <Text style={styles.overviewTitle}>Todays Progress</Text>
@@ -695,11 +695,11 @@ export default function DietScreen() {
                 <Text style={styles.nutritionTarget}>/{targets.fat}g</Text>
               </View>
             </View>
-          </Card>
+          </Card> */}
 
           {/* Detailed Progress */}
           <Card style={styles.progressCard}>
-            <Text style={styles.progressTitle}>Detailed Progress</Text>
+            <Text style={styles.progressTitle}>Todays Progress</Text>
             <View style={styles.progressBars}>
               <ProgressBar
                 label="Calories"
