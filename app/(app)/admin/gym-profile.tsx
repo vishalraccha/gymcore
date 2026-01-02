@@ -896,9 +896,48 @@ export default function GymProfileScreen() {
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
                     <Upload size={16} color="#FFFFFF" />
+
+                    
                   )}
                 </TouchableOpacity>
               )}
+
+{hasGym && gymData.logo_url && (
+  <TouchableOpacity 
+    style={{
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      backgroundColor: theme.colors.success,
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 3,
+      borderColor: theme.colors.card,
+    }}
+    onPress={async () => {
+      try {
+        const { error } = await supabase
+          .from('gyms')
+          .update({ logo_url: gymData.logo_url,name: gymData.name, })
+          .eq('id', gymData.id);
+
+        if (error) throw error;
+        
+        Alert.alert('Success', 'Logo saved successfully!');
+        await refreshGym();
+      } catch (error) {
+        console.error('Save error:', error);
+        Alert.alert('Error', 'Failed to save logo');
+      }
+    }}
+    activeOpacity={0.7}
+  >
+    <CheckCircle size={16} color="#FFFFFF" />
+  </TouchableOpacity>
+)}
             </View>
 
             <View style={styles.profileInfo}>
