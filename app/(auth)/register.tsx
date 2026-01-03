@@ -17,7 +17,7 @@ import { Link, router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { User, Building2, X } from 'lucide-react-native';
+import { User, Building2, X, Eye, EyeOff } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
@@ -97,6 +97,8 @@ export default function RegisterScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(50));
+  const [showPassword, setShowPassword] = useState(false);
+const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const { signUp , refreshProfile, refreshGym} = useAuth();
 
   React.useEffect(() => {
@@ -303,7 +305,35 @@ export default function RegisterScreen() {
       marginTop: 8,
       minHeight: 52,
     },
+    // Add these to your StyleSheet
+passwordInputContainer: {
+  position: 'relative',
+  marginBottom: 16,
+},
+passwordInput: {
+  borderWidth: 1.5,
+  borderColor: theme.colors.border,
+  borderRadius: 12,
+  paddingHorizontal: 16,
+  paddingRight: 50, // ⭐ Space for icon
+  paddingVertical: 14,
+  fontSize: 16,
+  backgroundColor: theme.colors.card,
+  color: theme.colors.text,
+  minHeight: 52,
+},
+eyeIconButton: {
+  position: 'absolute',
+  right: 16,
+  top: 14,
+  padding: 4,
+},
   });
+
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
 
   const handleRegister = async () => {
     console.log('🚀 handleRegister CALLED');
@@ -317,25 +347,25 @@ export default function RegisterScreen() {
       });
 
       if (!email || !password || !fullName || !confirmPassword) {
-        console.warn('❌ Missing fields');
+        window.alert('❌ Missing fields');
         Alert.alert('Error', 'Please fill in all fields');
         return;
       }
 
       if (password !== confirmPassword) {
-        console.warn('❌ Password mismatch');
+        window.alert('❌ Password mismatch');
         Alert.alert('Error', 'Passwords do not match');
         return;
       }
 
       if (password.length < 6) {
-        console.warn('❌ Password too short');
+        window.alert('❌ Password too short');
         Alert.alert('Error', 'Password must be at least 6 characters');
         return;
       }
 
       if (selectedRole === 'gym_owner' && !gymDetails?.name) {
-        console.warn('❌ Gym owner without gym name');
+        window.alert('❌ Gym owner without gym name');
         Alert.alert('Error', 'Please provide gym details first');
         setShowGymDetails(true);
         return;
@@ -358,6 +388,7 @@ export default function RegisterScreen() {
       console.log('🧾 Signup response error:', signUpError);
 
       if (signUpError) {
+        window.alert('Registration Failed');
         Alert.alert('Registration Failed', signUpError.message);
         setIsLoading(false);
         return;
@@ -587,32 +618,55 @@ export default function RegisterScreen() {
                 />
               </View>
 
-              <View style={styles.inputContainer}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Password (min. 6 characters)"
-                  placeholderTextColor={theme.colors.textSecondary}
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  textContentType="newPassword"
-                />
-              </View>
+              {/* Password Input */}
+<View style={styles.passwordInputContainer}>
+  <TextInput
+    style={styles.passwordInput}
+    placeholder="Password (min. 6 characters)"
+    placeholderTextColor={theme.colors.textSecondary}
+    value={password}
+    onChangeText={setPassword}
+    secureTextEntry={!showPassword}
+    autoCapitalize="none"
+    textContentType="newPassword"
+  />
+  <TouchableOpacity
+    onPress={() => setShowPassword(!showPassword)}
+    style={styles.eyeIconButton}
+    activeOpacity={0.7}
+  >
+    {showPassword ? (
+      <EyeOff size={20} color={theme.colors.textSecondary} />
+    ) : (
+      <Eye size={20} color={theme.colors.textSecondary} />
+    )}
+  </TouchableOpacity>
+</View>
 
-              <View style={styles.inputContainer}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Confirm Password"
-                  placeholderTextColor={theme.colors.textSecondary}
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  textContentType="newPassword"
-                />
-              </View>
-
+{/* Confirm Password Input */}
+<View style={styles.passwordInputContainer}>
+  <TextInput
+    style={styles.passwordInput}
+    placeholder="Confirm Password"
+    placeholderTextColor={theme.colors.textSecondary}
+    value={confirmPassword}
+    onChangeText={setConfirmPassword}
+    secureTextEntry={!showConfirmPassword}
+    autoCapitalize="none"
+    textContentType="newPassword"
+  />
+  <TouchableOpacity
+    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+    style={styles.eyeIconButton}
+    activeOpacity={0.7}
+  >
+    {showConfirmPassword ? (
+      <EyeOff size={20} color={theme.colors.textSecondary} />
+    ) : (
+      <Eye size={20} color={theme.colors.textSecondary} />
+    )}
+  </TouchableOpacity>
+</View>
               {/* Gym Details Preview for Gym Owner */}
               {selectedRole === 'gym_owner' && gymDetails.name && (
                 <TouchableOpacity

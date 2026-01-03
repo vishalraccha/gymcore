@@ -16,7 +16,7 @@
   import { useAuth } from '@/contexts/AuthContext';
   import { Button } from '@/components/ui/Button';
   import { Card } from '@/components/ui/Card';
-  import { User, Shield } from 'lucide-react-native';
+  import { User, Shield ,Eye, EyeOff} from 'lucide-react-native';
   import { SafeAreaView } from 'react-native-safe-area-context';
   import { useTheme } from '@/contexts/ThemeContext';
 
@@ -31,6 +31,8 @@
     const [isLoading, setIsLoading] = useState(false);
     const [fadeAnim] = useState(new Animated.Value(0));
     const [slideAnim] = useState(new Animated.Value(50));
+    const [showPassword, setShowPassword] = useState(false);
+const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const { signIn } = useAuth();
 
     React.useEffect(() => {
@@ -52,6 +54,29 @@
     // Only clear on explicit logout, not on every login screen mount
 
     const styles = StyleSheet.create({
+      // Add these to your StyleSheet
+passwordInputContainer: {
+  position: 'relative',
+  marginBottom: 16,
+},
+passwordInput: {
+  borderWidth: 1.5,
+  borderColor: theme.colors.border,
+  borderRadius: 12,
+  paddingHorizontal: 16,
+  paddingRight: 50, // ⭐ Space for icon
+  paddingVertical: 14,
+  fontSize: 16,
+  backgroundColor: theme.colors.card,
+  color: theme.colors.text,
+  minHeight: 52,
+},
+eyeIconButton: {
+  position: 'absolute',
+  right: 16,
+  top: 14,
+  padding: 4,
+},
       safeArea: {
         flex: 1,
         backgroundColor: theme.colors.background,
@@ -283,7 +308,7 @@
             >
               {/* Header */}
               <View style={styles.header}>
-                <Text style={styles.title}>Welcome Back</Text>
+                <Text style={styles.title}>Welcome to Gym Core</Text>
                 <Text style={styles.subtitle}>Sign in to continue your fitness journey</Text>
               </View>
 
@@ -345,18 +370,29 @@
                 </View>
 
                 {/* Password Input */}
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Password"
-                    placeholderTextColor={theme.colors.textSecondary}
-                    value={password}
-                    onChangeText={setPassword}
-                    secureTextEntry
-                    autoCapitalize="none"
-                    textContentType="password"
-                  />
-                </View>
+<View style={styles.passwordInputContainer}>
+  <TextInput
+    style={styles.passwordInput}
+    placeholder="Password"
+    placeholderTextColor={theme.colors.textSecondary}
+    value={password}
+    onChangeText={setPassword}
+    secureTextEntry={!showPassword}
+    autoCapitalize="none"
+    textContentType="password"
+  />
+  <TouchableOpacity
+    onPress={() => setShowPassword(!showPassword)}
+    style={styles.eyeIconButton}
+    activeOpacity={0.7}
+  >
+    {showPassword ? (
+      <EyeOff size={20} color={theme.colors.textSecondary} />
+    ) : (
+      <Eye size={20} color={theme.colors.textSecondary} />
+    )}
+  </TouchableOpacity>
+</View>
 
                 {/* Login Button */}
                 <Button

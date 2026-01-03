@@ -480,21 +480,25 @@ export default function MembersScreen() {
 
   const addMember = async () => {
     if (!newMember.full_name || !newMember.email || !newMember.password || !newMember.phone) {
+      window.alert('Please fill in all required fields')
       Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
 
     if (newMember.password.length < 6) {
+      window.alert('Password must be at least 6 characters')
       Alert.alert('Error', 'Password must be at least 6 characters');
       return;
     }
 
     if ((paymentMethod === 'cash' || paymentMethod === 'online') && selectedSubscription) {
       if (!amountReceived || parseFloat(amountReceived) <= 0) {
+        window.alert('Please enter amount received')
         Alert.alert('Error', 'Please enter amount received');
         return;
       }
       if (parseFloat(amountReceived) > selectedSubscription.price) {
+        window.alert('Amount received cannot exceed plan price')
         Alert.alert('Error', 'Amount received cannot exceed plan price');
         return;
       }
@@ -523,25 +527,25 @@ export default function MembersScreen() {
       if (authError) throw authError;
       if (!authData.user) throw new Error('Failed to create user');
 
-
-
       const userId = authData.user.id;
-      if (newMember.weight || newMember.height) {
-        await supabase
-          .from('profiles')
-          .update({
-            weight: newMember.weight ? parseFloat(newMember.weight) : null,
-            height: newMember.height ? parseFloat(newMember.height) : null,
-          })
-          .eq('id', userId);
-      }
+
+      // ⭐ FIX: Update profile with gym_id, weight, and height
+      await supabase
+        .from('profiles')
+        .update({
+          gym_id: profile?.gym_id, // ⭐ ADD: Set gym_id directly
+          weight: newMember.weight ? parseFloat(newMember.weight) : null,
+          height: newMember.height ? parseFloat(newMember.height) : null,
+        })
+        .eq('id', userId);
+
       if (adminSession) {
         await supabase.auth.setSession({
           access_token: adminSession.access_token,
           refresh_token: adminSession.refresh_token,
         });
-
       }
+
       // Wait for signOut to complete
       await new Promise((resolve) => setTimeout(resolve, 500));
 
@@ -648,6 +652,7 @@ export default function MembersScreen() {
           }
         } catch (subError) {
           console.error('Error creating subscription:', subError);
+          window.alert('Member created but subscription setup failed.');
           Alert.alert('Warning', 'Member created but subscription setup failed.');
         }
       }
@@ -690,6 +695,7 @@ export default function MembersScreen() {
     } catch (error: any) {
       const errorMessage = error?.message || 'Failed to add member';
       if (errorMessage.includes('already registered')) {
+        window.alert('This email is already registered')
         Alert.alert('Error', 'This email is already registered');
       } else {
         Alert.alert('Error', errorMessage);
@@ -748,11 +754,13 @@ export default function MembersScreen() {
 
   const payPendingAmount = async () => {
     if (!selectedMember || !selectedMember.currentSubscription) {
+      window.alert('No subscription found')
       Alert.alert('Error', 'No subscription found');
       return;
     }
 
     if (!pendingPaymentAmount || parseFloat(pendingPaymentAmount) <= 0) {
+      window.alert('Please enter payment amount')
       Alert.alert('Error', 'Please enter payment amount');
       return;
     }
@@ -761,6 +769,7 @@ export default function MembersScreen() {
     const currentPending = selectedMember.currentSubscription.pending_amount || 0;
 
     if (paymentAmount > currentPending) {
+      window.alert(`Payment amount cannot exceed pending amount of ${formatRupees(currentPending)}`)
       Alert.alert('Error', `Payment amount cannot exceed pending amount of ${formatRupees(currentPending)}`);
       return;
     }
@@ -2494,18 +2503,44 @@ export default function MembersScreen() {
                       </TouchableOpacity>
 
                       {showDatePicker && (
-                        <DateTimePicker
-                          value={customStartDate}
-                          mode="date"
-                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                          onChange={(event, selectedDate) => {
-                            setShowDatePicker(Platform.OS === 'ios'); // Keep open on iOS
-                            if (selectedDate) {
-                              setCustomStartDate(selectedDate);
-                            }
-                          }}
-                          minimumDate={new Date(2020, 0, 1)} // Can't go before 2020
-                        />
+                        <>
+                          {Platform.OS === 'web' ? (
+                            <input
+                              type="date"
+                              value={customStartDate.toISOString().split('T')[0]}
+                              onChange={(e) => {
+                                const selectedDate = new Date(e.target.value);
+                                setCustomStartDate(selectedDate);
+                                setShowDatePicker(false);
+                              }}
+                              min="2020-01-01"
+                              style={{
+                                width: '100%',
+                                padding: 16,
+                                fontSize: 16,
+                                borderRadius: 12,
+                                borderWidth: 1.5,
+                                borderColor: theme.colors.border,
+                                backgroundColor: theme.colors.card,
+                                color: theme.colors.text,
+                                marginBottom: 16,
+                              }}
+                            />
+                          ) : (
+                            <DateTimePicker
+                              value={customStartDate}
+                              mode="date"
+                              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                              onChange={(event, selectedDate) => {
+                                setShowDatePicker(Platform.OS === 'ios');
+                                if (selectedDate) {
+                                  setCustomStartDate(selectedDate);
+                                }
+                              }}
+                              minimumDate={new Date(2020, 0, 1)}
+                            />
+                          )}
+                        </>
                       )}
 
                       <Text style={styles.helperText}>

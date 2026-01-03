@@ -67,6 +67,7 @@ export default function HomeScreen() {
   const [currentStatIndex, setCurrentStatIndex] = useState(0);
   const scrollX = useRef(new Animated.Value(0)).current;
   const { stats, streak, refreshStats } = useStats(selectedDate);
+  const [gymData, setGymData] = useState<any>(null);
   const [monthlyStats, setMonthlyStats] = useState({
     totalWorkouts: 0,
     totalDuration: 0,
@@ -84,6 +85,20 @@ export default function HomeScreen() {
       fetchPendingPayments();
     }
   }, [user, selectedDate]);
+
+  useEffect(() => {
+    const fetchGymData = async () => {
+      if (profile?.gym_id) {
+        const { data } = await supabase
+          .from('gyms')
+          .select('name, logo_url')
+          .eq('id', profile.gym_id)
+          .single();
+        setGymData(data);
+      }
+    };
+    fetchGymData();
+  }, [profile?.gym_id]);
 
   const fetchMonthlyStats = async () => {
     if (!user) return;
@@ -391,6 +406,38 @@ export default function HomeScreen() {
   };
 
   const styles = StyleSheet.create({
+    headerContent: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: 20,
+    },
+    headerLeft: {
+      flex: 1,
+    },
+    name: {
+      fontSize: 32,
+      fontWeight: '800',
+      color: theme.colors.text,
+      marginBottom: 4,
+      fontFamily: 'Inter-Bold',
+      letterSpacing: -0.5,
+    },
+    gymNameBelow: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      fontFamily: 'Inter-SemiBold',
+    },
+    greetingContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    greeting: {
+      fontSize: 25,
+      color: theme.colors.textSecondary,
+      fontFamily: 'Inter-Medium',
+    },
     container: {
       flex: 1,
       backgroundColor: theme.colors.background,
@@ -458,25 +505,7 @@ export default function HomeScreen() {
       shadowRadius: 12,
       elevation: 5,
     },
-    greetingContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginBottom: 8,
-    },
-    greeting: {
-      fontSize: 16,
-      color: theme.colors.textSecondary,
-      fontFamily: 'Inter-Medium',
-    },
-    name: {
-      fontSize: 36,
-      fontWeight: '800',
-      color: theme.colors.text,
-      marginBottom: 16,
-      fontFamily: 'Inter-Bold',
-      letterSpacing: -0.5,
-    },
+   
     statsRow: {
       flexDirection: 'row',
       gap: 12,
@@ -785,30 +814,42 @@ export default function HomeScreen() {
   return (
     <SafeAreaWrapper>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <View style={styles.greetingContainer}>
-            {greeting.icon}
-            <Text style={styles.greeting}>{greeting.text}</Text>
-          </View>
-          <Text style={styles.name}>{safeProfile.full_name?.split(' ')[0] || 'User'}</Text>
-          <View style={styles.statsRow}>
-            <View style={styles.quickStat}>
-              <Award size={24} color={theme.colors.primary} />
-              <Text style={styles.quickStatValue}>Lvl {safeProfile.level || 1}</Text>
-              <Text style={styles.quickStatLabel}>Level</Text>
-            </View>
-            <View style={styles.quickStat}>
-              <Flame size={24} color={theme.colors.warning} />
-              <Text style={styles.quickStatValue}>{safeProfile.current_streak || 0}</Text>
-              <Text style={styles.quickStatLabel}>Day Streak</Text>
-            </View>
-            <View style={styles.quickStat}>
-              <Target size={24} color={theme.colors.success} />
-              <Text style={styles.quickStatValue}>{safeProfile.total_points || 0}</Text>
-              <Text style={styles.quickStatLabel}>Points</Text>
-            </View>
-          </View>
-        </View>
+      <View style={styles.header}>
+  <View style={styles.headerContent}>
+    {/* Left Side: Name + Gym */}
+    <View style={styles.headerLeft}>
+      <Text style={styles.name}>{safeProfile.full_name?.split(' ')[0] || 'User'}</Text>
+      {profile?.gym_id && gymData?.name && (
+        <Text style={styles.gymNameBelow}>{gymData.name}</Text>
+      )}
+    </View>
+
+    {/* Right Side: Greeting */}
+    <View style={styles.greetingContainer}>
+      {greeting.icon}
+      <Text style={styles.greeting}>{greeting.text}</Text>
+    </View>
+  </View>
+
+  {/* Stats Row Below */}
+  <View style={styles.statsRow}>
+    <View style={styles.quickStat}>
+      <Award size={24} color={theme.colors.primary} />
+      <Text style={styles.quickStatValue}>Lvl {safeProfile.level || 1}</Text>
+      <Text style={styles.quickStatLabel}>Level</Text>
+    </View>
+    <View style={styles.quickStat}>
+      <Flame size={24} color={theme.colors.warning} />
+      <Text style={styles.quickStatValue}>{safeProfile.current_streak || 0}</Text>
+      <Text style={styles.quickStatLabel}>Day Streak</Text>
+    </View>
+    <View style={styles.quickStat}>
+      <Target size={24} color={theme.colors.success} />
+      <Text style={styles.quickStatValue}>{safeProfile.total_points || 0}</Text>
+      <Text style={styles.quickStatLabel}>Points</Text>
+    </View>
+  </View>
+</View>
 
         {pendingPayments.length > 0 && (
           <Card style={styles.pendingPaymentBanner}>

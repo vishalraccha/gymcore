@@ -86,11 +86,13 @@ export default function WorkoutsManagementScreen() {
 
   const addOrUpdateWorkout = async () => {
     if (!newWorkout.name || !newWorkout.category || !newWorkout.duration_minutes) {
+      window.alert('Please fill in all required fields (Name, Category, Duration)')
       Alert.alert('Error', 'Please fill in all required fields (Name, Category, Duration)');
       return;
     }
 
     if (newWorkout.video_url && !validateYouTubeUrl(newWorkout.video_url)) {
+      window.alert('Please enter a valid YouTube URL')
       Alert.alert('Error', 'Please enter a valid YouTube URL');
       return;
     }
@@ -191,6 +193,7 @@ export default function WorkoutsManagementScreen() {
       setWorkouts((prev) => prev.filter((w) => w.id !== workoutId));
 
       if (Platform.OS === "web") {
+        window.alert("Workout deleted successfully")
         alert("Workout deleted successfully");
       } else {
         Alert.alert("Success", "Workout deleted successfully");
