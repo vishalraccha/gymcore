@@ -11,6 +11,7 @@ import {
   Platform,
   TouchableOpacity,
   Alert,
+  Image
 } from "react-native";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSubscription } from "@/contexts/SubscriptionContext";
@@ -152,6 +153,7 @@ export default function ProfileScreen() {
     },
     gymHeader: {
       flexDirection: 'row',
+      gap:14,
       alignItems: 'center',
     },
     gymIconContainer: {
@@ -200,6 +202,19 @@ export default function ProfileScreen() {
     noSubscription: { 
       backgroundColor: theme.colors.card,
       borderWidth: 0,
+    },
+    gymIcon: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: theme.colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: theme.colors.primary,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.4,
+      shadowRadius: 12,
+      elevation: 8,
     },
     subscriptionHeader: { 
       flexDirection: "row", 
@@ -316,6 +331,17 @@ export default function ProfileScreen() {
     },
     subscribeButtonContainer: {
       marginTop: 8,
+    },
+    gymLogo: {
+      width: 64,
+      height: 64,
+      borderRadius: 50,
+    },
+    
+    fallbackText: {
+      color: '#FFFFFF',
+      fontSize: 18,
+      fontWeight: '700',
     },
     subscribeButton: {
       flexDirection: "row",
@@ -607,9 +633,19 @@ export default function ProfileScreen() {
         {safe.role === 'member' && gym && (
           <Card style={styles.gymCard}>
             <View style={styles.gymHeader}>
-              <View style={[styles.gymIconContainer, { backgroundColor: theme.colors.primaryLight + '30' }]}>
-                <Building2 size={24} color={theme.colors.primary} />
-              </View>
+            <View style={styles.gymIcon}>
+              {gym?.logo_url ? (
+                <Image
+                  source={{ uri: gym.logo_url }}
+                  style={styles.gymLogo}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Text style={styles.fallbackText}>
+                  {gym?.name?.charAt(0).toUpperCase() || 'G'}
+                </Text>
+              )}
+            </View>
               <View style={styles.gymInfo}>
                 <Text style={styles.gymLabel}>Your Gym</Text>
                 <Text style={styles.gymName}>{gym.name}</Text>

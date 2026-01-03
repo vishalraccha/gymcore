@@ -81,6 +81,10 @@ export interface Workout {
   created_by?: string;
   created_at: string;
   updated_at: string;
+  sets?: number;              
+  reps?: number;              
+  body_part?: string; 
+  video_url?:string;
 }
 
 export interface WorkoutLog {

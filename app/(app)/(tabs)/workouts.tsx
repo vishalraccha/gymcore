@@ -13,38 +13,45 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
 import { Workout, WorkoutLog } from '@/types/database';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Clock, CheckCircle, Flame, Target, Dumbbell } from 'lucide-react-native';
+import { 
+  Clock, 
+  CheckCircle, 
+  Flame, 
+  Target, 
+  Dumbbell,
+  Filter,
+  X,
+  AlertCircle,
+  Repeat,
+} from 'lucide-react-native';
+import { WebView } from 'react-native-webview';
+import { Linking, Modal } from 'react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const COLORS = {
-  primary: '#3B82F6',
-  primaryLight: '#EEF2FF',
-  success: '#10B981',
-  successLight: '#D1FAE5',
-  warning: '#F59E0B',
-  warningLight: '#FEF3C7',
-  error: '#EF4444',
-  errorLight: '#FEE2E2',
-  background: '#F8FAFC',
-  cardBg: '#FFFFFF',
-  text: '#0F172A',
-  textSecondary: '#64748B',
-  border: '#E2E8F0',
-  accent: '#8B5CF6',
-  accentLight: '#F3E8FF',
+const getYouTubeVideoId = (url: string): string | null => {
+  if (!url) return null;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+  const match = url.match(regExp);
+  return (match && match[2].length === 11) ? match[2] : null;
 };
 
+type BodyPart = 'all' | 'chest' | 'back' | 'legs' | 'shoulders' | 'arms' | 'core' | 'full_body' | 'cardio';
+type Difficulty = 'all' | 'beginner' | 'intermediate' | 'advanced';
+
 export default function WorkoutsScreen() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const { theme } = useTheme();
   
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [filteredWorkouts, setFilteredWorkouts] = useState<Workout[]>([]);
   const [todayLogs, setTodayLogs] = useState<WorkoutLog[]>([]);
+  const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
   const [activeWorkout, setActiveWorkout] = useState<string | null>(null);
   const [workoutTimer, setWorkoutTimer] = useState(0);
   const [timerInterval, setTimerInterval] = useState<ReturnType<typeof setInterval> | null>(null);
@@ -52,10 +59,17 @@ export default function WorkoutsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [fadeAnim] = useState(new Animated.Value(0));
   
+  // Filters
+  const [selectedBodyPart, setSelectedBodyPart] = useState<BodyPart>('all');
+  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>('all');
+  const [showFilters, setShowFilters] = useState(false);
+  const [showVideoModal, setShowVideoModal] = useState(false);
+const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null);
+  
   // Get current day: 0=Monday, 1=Tuesday, ..., 6=Sunday
   const [selectedDay, setSelectedDay] = useState<number>(() => {
     const today = new Date().getDay();
-    return today === 0 ? 6 : today - 1; // Convert Sunday(0) to 6, others to 0-5
+    return today === 0 ? 6 : today - 1;
   });
 
   useEffect(() => {
@@ -78,7 +92,11 @@ export default function WorkoutsScreen() {
 
   const loadData = async () => {
     try {
-      await Promise.all([fetchWorkouts(), fetchTodayLogs()]);
+      await Promise.all([
+        fetchWorkouts(), 
+        fetchTodayLogs(), 
+        checkTodayAttendance()
+      ]);
     } catch (error) {
       console.error('Error loading data:', error);
     }
@@ -93,6 +111,26 @@ export default function WorkoutsScreen() {
     }
   }, []);
 
+  const checkTodayAttendance = async () => {
+    if (!user || !profile?.gym_id) return;
+    
+    try {
+      const todayDate = new Date().toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('gym_id', profile.gym_id)
+        .gte('check_in_time', todayDate)
+        .limit(1)
+        .single();
+
+      setHasCheckedInToday(!!data && !error);
+    } catch (error) {
+      setHasCheckedInToday(false);
+    }
+  };
+
   const fetchWorkouts = async () => {
     if (!user) return;
     
@@ -104,7 +142,6 @@ export default function WorkoutsScreen() {
         .single();
 
       if (!profile) {
-        console.log('No profile found');
         setWorkouts([]);
         return;
       }
@@ -117,7 +154,7 @@ export default function WorkoutsScreen() {
         .eq('gym_id', profile.gym_id)
         .order('name', { ascending: true });
 
-      // Fetch global workouts (no gym_id)
+      // Fetch global workouts
       const { data: globalWorkouts } = await supabase
         .from('workouts')
         .select('*')
@@ -126,52 +163,43 @@ export default function WorkoutsScreen() {
         .order('name', { ascending: true });
 
       const allWorkouts = [...(gymWorkouts || []), ...(globalWorkouts || [])];
-      
-      console.log(`✅ Fetched ${allWorkouts.length} workouts (${gymWorkouts?.length || 0} gym + ${globalWorkouts?.length || 0} global)`);
-      
       setWorkouts(allWorkouts);
-      filterWorkoutsByDay(allWorkouts, selectedDay);
     } catch (error) {
       console.error('Error fetching workouts:', error);
       Alert.alert('Error', 'Failed to fetch workouts');
     }
   };
 
-  const filterWorkoutsByDay = useCallback((workoutsList: Workout[], dayIndex: number) => {
-    // dayIndex: 0=Monday, 1=Tuesday, ..., 6=Sunday
-    // Convert to day_of_week: 1=Monday, 2=Tuesday, ..., 0=Sunday
-    const dayOfWeek = dayIndex === 6 ? 0 : dayIndex + 1;
-    
-    console.log(`\n🔍 Filtering for day: ${dayIndex} (day_of_week: ${dayOfWeek})`);
-    console.log(`📋 All workouts in database:`);
-    workoutsList.forEach(w => {
-      console.log(`  - "${w.name}" has day_of_week: ${w.day_of_week} (${typeof w.day_of_week})`);
-    });
-    
-    const filtered = workoutsList.filter((workout) => {
-      // Convert workout.day_of_week to number for comparison (it's stored as string in DB)
+  const applyFilters = useCallback((workoutsList: Workout[]) => {
+    let filtered = workoutsList;
+
+    // Filter by day
+    const dayOfWeek = selectedDay === 6 ? 0 : selectedDay + 1;
+    filtered = filtered.filter((workout) => {
       const workoutDay = workout.day_of_week === null || workout.day_of_week === undefined 
         ? null 
         : Number(workout.day_of_week);
-      
-      // Show workouts with no specific day OR matching day
-      const matches = workoutDay === null || workoutDay === dayOfWeek;
-      
-      if (matches) {
-        console.log(`✅ Workout "${workout.name}" MATCHES (day_of_week: ${workout.day_of_week} -> ${workoutDay})`);
-      }
-      return matches;
+      return workoutDay === null || workoutDay === dayOfWeek;
     });
-    
-    console.log(`\n📊 Result: Found ${filtered.length} workouts for selected day\n`);
+
+    // Filter by body part
+    if (selectedBodyPart !== 'all') {
+      filtered = filtered.filter(w => w.body_part === selectedBodyPart);
+    }
+
+    // Filter by difficulty
+    if (selectedDifficulty !== 'all') {
+      filtered = filtered.filter(w => w.difficulty === selectedDifficulty);
+    }
+
     setFilteredWorkouts(filtered);
-  }, []);
+  }, [selectedDay, selectedBodyPart, selectedDifficulty]);
 
   useEffect(() => {
     if (workouts.length > 0) {
-      filterWorkoutsByDay(workouts, selectedDay);
+      applyFilters(workouts);
     }
-  }, [selectedDay, workouts, filterWorkoutsByDay]);
+  }, [selectedDay, selectedBodyPart, selectedDifficulty, workouts, applyFilters]);
 
   const fetchTodayLogs = async () => {
     if (!user) return;
@@ -193,6 +221,15 @@ export default function WorkoutsScreen() {
   };
 
   const startWorkout = (workoutId: string) => {
+    if (!hasCheckedInToday) {
+      Alert.alert(
+        'Check-in Required',
+        'Please check in at the gym before starting a workout.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     if (activeWorkout) {
       Alert.alert('Active Workout', 'Please complete your current workout first.');
       return;
@@ -250,7 +287,22 @@ export default function WorkoutsScreen() {
     }
   };
 
-  const cancelWorkout = () => {
+
+const cancelWorkout = () => {
+  if (Platform.OS === 'web') {
+    const confirmed = window.confirm(
+      'Are you sure? Your progress will not be saved.'
+    );
+
+    if (confirmed) {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        setTimerInterval(null);
+      }
+      setActiveWorkout(null);
+      setWorkoutTimer(0);
+    }
+  } else {
     Alert.alert(
       'Cancel Workout',
       'Are you sure? Your progress will not be saved.',
@@ -270,7 +322,9 @@ export default function WorkoutsScreen() {
         },
       ]
     );
-  };
+  }
+};
+
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -284,10 +338,24 @@ export default function WorkoutsScreen() {
 
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
-      case 'beginner': return COLORS.success;
-      case 'intermediate': return COLORS.warning;
-      case 'advanced': return COLORS.error;
-      default: return COLORS.textSecondary;
+      case 'beginner': return theme.colors.success;
+      case 'intermediate': return theme.colors.warning;
+      case 'advanced': return theme.colors.error;
+      default: return theme.colors.textSecondary;
+    }
+  };
+
+  const getBodyPartEmoji = (bodyPart: string) => {
+    switch (bodyPart) {
+      case 'chest': return '💪';
+      case 'back': return '🦾';
+      case 'legs': return '🦵';
+      case 'shoulders': return '🏋️';
+      case 'arms': return '💪';
+      case 'core': return '🔥';
+      case 'cardio': return '❤️';
+      case 'full_body': return '🏃';
+      default: return '💪';
     }
   };
 
@@ -302,6 +370,415 @@ export default function WorkoutsScreen() {
     return today === 0 ? 6 : today - 1;
   };
 
+  const activeFiltersCount = (selectedBodyPart !== 'all' ? 1 : 0) + (selectedDifficulty !== 'all' ? 1 : 0);
+
+  const styles = StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    container: {
+      flex: 1,
+    },
+    scrollContent: {
+      paddingBottom: 100,
+    },
+    header: {
+      paddingHorizontal: 20,
+      paddingTop: Platform.OS === 'ios' ? 8 : 16,
+      paddingBottom: 20,
+      backgroundColor: theme.colors.card,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    headerLeft: {
+      flex: 1,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: theme.colors.text,
+      letterSpacing: -0.5,
+    },
+    subtitle: {
+      fontSize: 15,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+    },
+    filterButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 12,
+      backgroundColor: theme.colors.primary + '15',
+      borderWidth: 1,
+      borderColor: theme.colors.primary + '30',
+    },
+    filterButtonActive: {
+      backgroundColor: theme.colors.primary,
+      borderColor: theme.colors.primary,
+    },
+    filterButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.primary,
+    },
+    filterButtonTextActive: {
+      color: theme.colors.card,
+    },
+    filterBadge: {
+      minWidth: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: theme.colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    filterBadgeText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: theme.colors.primary,
+    },
+    checkInAlert: {
+      marginHorizontal: 20,
+      marginTop: 16,
+      padding: 16,
+      borderRadius: 12,
+      backgroundColor: theme.colors.warning + '15',
+      borderWidth: 1,
+      borderColor: theme.colors.warning + '30',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    checkInAlertText: {
+      flex: 1,
+      fontSize: 14,
+      color: theme.colors.warning,
+      fontWeight: '500',
+    },
+    filterPanel: {
+      backgroundColor: theme.colors.card,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+      paddingHorizontal: 20,
+      paddingVertical: 16,
+    },
+    filterSection: {
+      marginBottom: 16,
+    },
+    filterSectionTitle: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+      marginBottom: 10,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    filterChips: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    videoButton: {
+      width: '100%',
+      minHeight: 48,
+      marginBottom: 8,
+    },
+    videoModalContainer: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    videoModalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 20,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+      backgroundColor: theme.colors.card,
+    },
+    videoModalTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    closeVideoButton: {
+      padding: 8,
+      borderRadius: 8,
+      backgroundColor: theme.colors.background,
+    },
+    filterChip: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 20,
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.background,
+    },
+    filterChipActive: {
+      backgroundColor: theme.colors.primary,
+      borderColor: theme.colors.primary,
+    },
+    filterChipText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+      textTransform: 'capitalize',
+    },
+    filterChipTextActive: {
+      color: theme.colors.card,
+    },
+    clearFiltersButton: {
+      marginTop: 8,
+      alignSelf: 'flex-start',
+    },
+    clearFiltersText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.error,
+    },
+    daySelectorContainer: {
+      marginTop: 16,
+      marginBottom: 16,
+      paddingHorizontal: 20,
+    },
+    daySelectorScroll: {
+      gap: 8,
+      paddingRight: 20,
+    },
+    dayButton: {
+      minWidth: 56,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+    },
+    dayButtonSelected: {
+      backgroundColor: theme.colors.primary,
+      borderColor: theme.colors.primary,
+    },
+    dayButtonToday: {
+      borderColor: theme.colors.accent,
+      borderWidth: 2,
+    },
+    dayButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    dayButtonTextSelected: {
+      color: theme.colors.card,
+    },
+    dayButtonTextToday: {
+      color: theme.colors.accent,
+    },
+    todayIndicator: {
+      position: 'absolute',
+      top: 6,
+      right: 6,
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: theme.colors.accent,
+    },
+    summaryCard: {
+      marginHorizontal: 20,
+      marginBottom: 16,
+      padding: 20,
+      borderRadius: 16,
+    },
+    summaryHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 16,
+      gap: 8,
+    },
+    summaryTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    summaryStats: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    summaryItem: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    summaryDivider: {
+      width: 1,
+      height: 40,
+      backgroundColor: theme.colors.border,
+      marginHorizontal: 12,
+    },
+    summaryValue: {
+      fontSize: 24,
+      fontWeight: '700',
+      color: theme.colors.primary,
+    },
+    summaryLabel: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+    },
+    noWorkoutsCard: {
+      marginHorizontal: 20,
+      alignItems: 'center',
+      paddingVertical: 48,
+      borderRadius: 16,
+    },
+    noWorkoutsText: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginTop: 16,
+      marginBottom: 8,
+    },
+    noWorkoutsSubtext: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      paddingHorizontal: 40,
+    },
+    workoutCard: {
+      marginHorizontal: 20,
+      marginBottom: 12,
+      padding: 20,
+      borderRadius: 16,
+    },
+    workoutHeader: {
+      marginBottom: 16,
+    },
+    workoutTitleRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: 12,
+      gap: 12,
+    },
+    workoutNameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      flex: 1,
+    },
+    workoutEmoji: {
+      fontSize: 24,
+    },
+    workoutName: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: theme.colors.text,
+      flex: 1,
+    },
+    completedBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.colors.success + '20',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 12,
+      gap: 4,
+    },
+    completedText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.success,
+    },
+    workoutDescription: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginBottom: 12,
+      lineHeight: 20,
+    },
+    workoutMetaGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+    },
+    metaItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: theme.colors.background,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 8,
+    },
+    metaText: {
+      fontSize: 13,
+      color: theme.colors.text,
+      fontWeight: '600',
+    },
+    difficultyBadge: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 8,
+    },
+    difficultyText: {
+      fontSize: 12,
+      fontWeight: '600',
+      textTransform: 'capitalize',
+    },
+    workoutActions: {
+      marginTop: 0,
+    },
+    activeWorkoutContainer: {
+      alignItems: 'center',
+      paddingTop: 16,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+    timerContainer: {
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    timerLabel: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginBottom: 8,
+    },
+    timerText: {
+      fontSize: 40,
+      fontWeight: '700',
+      color: theme.colors.primary,
+      letterSpacing: 2,
+    },
+    actionButtons: {
+      width: '100%',
+      gap: 8,
+    },
+    completeButton: {
+      width: '100%',
+      minHeight: 52,
+    },
+    cancelButton: {
+      width: '100%',
+      minHeight: 52,
+    },
+    startButton: {
+      width: '100%',
+      minHeight: 52,
+    },
+    startButtonDisabled: {
+      opacity: 0.5,
+    },
+  });
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
@@ -312,16 +789,124 @@ export default function WorkoutsScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={COLORS.primary}
-              colors={[COLORS.primary]}
+              tintColor={theme.colors.primary}
+              colors={[theme.colors.primary]}
             />
           }
         >
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.title}>Workouts</Text>
-            <Text style={styles.subtitle}>Your training schedule</Text>
+            <View style={styles.headerRow}>
+              <View style={styles.headerLeft}>
+                <Text style={styles.title}>Workouts</Text>
+                <Text style={styles.subtitle}>Your training schedule</Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.filterButton,
+                  (showFilters || activeFiltersCount > 0) && styles.filterButtonActive
+                ]}
+                onPress={() => setShowFilters(!showFilters)}
+                activeOpacity={0.7}
+              >
+                {showFilters ? (
+                  <X size={18} color={theme.colors.card} />
+                ) : (
+                  <Filter size={18} color={activeFiltersCount > 0 ? theme.colors.card : theme.colors.primary} />
+                )}
+                <Text style={[
+                  styles.filterButtonText,
+                  (showFilters || activeFiltersCount > 0) && styles.filterButtonTextActive
+                ]}>
+                  Filter
+                </Text>
+                {activeFiltersCount > 0 && !showFilters && (
+                  <View style={styles.filterBadge}>
+                    <Text style={styles.filterBadgeText}>{activeFiltersCount}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
+
+          {/* Filter Panel */}
+          {showFilters && (
+            <View style={styles.filterPanel}>
+              {/* Body Part Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Body Part</Text>
+                <View style={styles.filterChips}>
+                  {(['all', 'chest', 'back', 'legs', 'shoulders', 'arms', 'core', 'cardio', 'full_body'] as BodyPart[]).map((part) => (
+                    <TouchableOpacity
+                      key={part}
+                      style={[
+                        styles.filterChip,
+                        selectedBodyPart === part && styles.filterChipActive
+                      ]}
+                      onPress={() => setSelectedBodyPart(part)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[
+                        styles.filterChipText,
+                        selectedBodyPart === part && styles.filterChipTextActive
+                      ]}>
+                        {part === 'full_body' ? 'Full Body' : part}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Difficulty Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Difficulty</Text>
+                <View style={styles.filterChips}>
+                  {(['all', 'beginner', 'intermediate', 'advanced'] as Difficulty[]).map((diff) => (
+                    <TouchableOpacity
+                      key={diff}
+                      style={[
+                        styles.filterChip,
+                        selectedDifficulty === diff && styles.filterChipActive
+                      ]}
+                      onPress={() => setSelectedDifficulty(diff)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[
+                        styles.filterChipText,
+                        selectedDifficulty === diff && styles.filterChipTextActive
+                      ]}>
+                        {diff}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Clear Filters */}
+              {activeFiltersCount > 0 && (
+                <TouchableOpacity
+                  style={styles.clearFiltersButton}
+                  onPress={() => {
+                    setSelectedBodyPart('all');
+                    setSelectedDifficulty('all');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.clearFiltersText}>Clear all filters</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {/* Check-in Alert */}
+          {!hasCheckedInToday && (
+            <View style={styles.checkInAlert}>
+              <AlertCircle size={24} color={theme.colors.warning} />
+              <Text style={styles.checkInAlertText}>
+                Check in at the gym to unlock workouts
+              </Text>
+            </View>
+          )}
 
           {/* Day Selector */}
           <View style={styles.daySelectorContainer}>
@@ -365,7 +950,7 @@ export default function WorkoutsScreen() {
           {todayLogs.length > 0 && (
             <Card style={styles.summaryCard}>
               <View style={styles.summaryHeader}>
-                <CheckCircle size={24} color={COLORS.success} />
+                <CheckCircle size={24} color={theme.colors.success} />
                 <Text style={styles.summaryTitle}>Today's Achievement</Text>
               </View>
               <View style={styles.summaryStats}>
@@ -390,10 +975,12 @@ export default function WorkoutsScreen() {
           {/* Workouts List */}
           {filteredWorkouts.length === 0 ? (
             <Card style={styles.noWorkoutsCard}>
-              <Dumbbell size={48} color={COLORS.textSecondary} />
-              <Text style={styles.noWorkoutsText}>No workouts scheduled</Text>
+              <Dumbbell size={48} color={theme.colors.textSecondary} />
+              <Text style={styles.noWorkoutsText}>No workouts found</Text>
               <Text style={styles.noWorkoutsSubtext}>
-                Try selecting a different day or check back later
+                {activeFiltersCount > 0 
+                  ? 'Try adjusting your filters or select a different day'
+                  : 'No workouts scheduled for this day'}
               </Text>
             </Card>
           ) : (
@@ -401,10 +988,17 @@ export default function WorkoutsScreen() {
               <Card key={workout.id} style={styles.workoutCard}>
                 <View style={styles.workoutHeader}>
                   <View style={styles.workoutTitleRow}>
-                    <Text style={styles.workoutName} numberOfLines={2}>{workout.name}</Text>
+                    <View style={styles.workoutNameRow}>
+                      <Text style={styles.workoutEmoji}>
+                        {getBodyPartEmoji(workout.body_part || 'full_body')}
+                      </Text>
+                      <Text style={styles.workoutName} numberOfLines={2}>
+                        {workout.name}
+                      </Text>
+                    </View>
                     {isWorkoutCompleted(workout.id) && (
                       <View style={styles.completedBadge}>
-                        <CheckCircle size={16} color={COLORS.success} />
+                        <CheckCircle size={16} color={theme.colors.success} />
                         <Text style={styles.completedText}>Done</Text>
                       </View>
                     )}
@@ -416,13 +1010,21 @@ export default function WorkoutsScreen() {
                     </Text>
                   )}
                   
-                  <View style={styles.workoutMeta}>
+                  <View style={styles.workoutMetaGrid}>
+                    {workout.sets && workout.reps && (
+                      <View style={styles.metaItem}>
+                        <Repeat size={16} color={theme.colors.primary} />
+                        <Text style={styles.metaText}>
+                          {workout.sets} × {workout.reps}
+                        </Text>
+                      </View>
+                    )}
                     <View style={styles.metaItem}>
-                      <Clock size={16} color={COLORS.textSecondary} />
+                      <Clock size={16} color={theme.colors.textSecondary} />
                       <Text style={styles.metaText}>{workout.duration_minutes} min</Text>
                     </View>
                     <View style={styles.metaItem}>
-                      <Flame size={16} color={COLORS.error} />
+                      <Flame size={16} color={theme.colors.error} />
                       <Text style={styles.metaText}>
                         {(workout.duration_minutes * Number(workout.calories_per_minute)).toFixed(0)} cal
                       </Text>
@@ -442,293 +1044,111 @@ export default function WorkoutsScreen() {
                 </View>
 
                 <View style={styles.workoutActions}>
-                  {activeWorkout === workout.id ? (
-                    <View style={styles.activeWorkoutContainer}>
-                      <View style={styles.timerContainer}>
-                        <Text style={styles.timerLabel}>Workout in progress</Text>
-                        <Text style={styles.timerText}>{formatTime(workoutTimer)}</Text>
-                      </View>
-                      <View style={styles.actionButtons}>
-                        <Button
-                          title="Complete Workout"
-                          onPress={() => stopWorkout(workout)}
-                          isLoading={isLoading}
-                          disabled={isLoading}
-                          style={styles.completeButton}
-                        />
-                        <Button
-                          title="Cancel"
-                          onPress={cancelWorkout}
-                          variant="outline"
-                          disabled={isLoading}
-                          style={styles.cancelButton}
-                        />
-                      </View>
-                    </View>
-                  ) : (
-                    !isWorkoutCompleted(workout.id) && (
-                      <Button
-                        title="Start Workout"
-                        onPress={() => startWorkout(workout.id)}
-                        disabled={activeWorkout !== null}
-                        style={styles.startButton}
-                      />
-                    )
-                  )}
-                </View>
+  {activeWorkout === workout.id ? (
+    <View style={styles.activeWorkoutContainer}>
+      <View style={styles.timerContainer}>
+        <Text style={styles.timerLabel}>Workout in progress</Text>
+        <Text style={styles.timerText}>{formatTime(workoutTimer)}</Text>
+      </View>
+      <View style={styles.actionButtons}>
+        <Button
+          title="Complete Workout"
+          onPress={() => stopWorkout(workout)}
+          isLoading={isLoading}
+          disabled={isLoading}
+          style={styles.completeButton}
+        />
+        <Button
+          title="Cancel"
+          onPress={cancelWorkout}
+          variant="outline"
+          disabled={isLoading}
+          style={styles.cancelButton}
+        />
+      </View>
+    </View>
+  ) : (
+    <>
+      {/* Video Button */}
+      {workout.video_url && (
+        <Button
+          title="Watch Video 🎥"
+          onPress={() => {
+            setSelectedVideoUrl(workout.video_url || null);
+            setShowVideoModal(true);
+          }}
+          variant="outline"
+          style={styles.videoButton}
+        />
+      )}
+      
+      {/* Start Workout Button */}
+      {!isWorkoutCompleted(workout.id) && (
+        <Button
+          title={hasCheckedInToday ? "Start Workout" : "Check-in Required"}
+          onPress={() => startWorkout(workout.id)}
+          disabled={!hasCheckedInToday || activeWorkout !== null}
+          style={[
+            styles.startButton,
+            !hasCheckedInToday && styles.startButtonDisabled
+          ]}
+        />
+      )}
+    </>
+  )}
+</View>
               </Card>
             ))
           )}
         </ScrollView>
+        <Modal
+          visible={showVideoModal}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowVideoModal(false)}
+        >
+          <SafeAreaView style={styles.videoModalContainer}>
+            <View style={styles.videoModalHeader}>
+              <Text style={styles.videoModalTitle}>Workout Tutorial</Text>
+              <TouchableOpacity
+                onPress={() => setShowVideoModal(false)}
+                style={styles.closeVideoButton}
+              >
+                <X size={24} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
+            
+            {selectedVideoUrl && (
+              <>
+                {Platform.OS === 'web' ? (
+                  <iframe
+                    src={`https://www.youtube.com/embed/${getYouTubeVideoId(selectedVideoUrl)}`}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      border: 'none',
+                    }}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : (
+                  <WebView
+                    source={{ 
+                      uri: `https://www.youtube.com/embed/${getYouTubeVideoId(selectedVideoUrl)}` 
+                    }}
+                    style={{ flex: 1 }}
+                    allowsFullscreenVideo
+                    javaScriptEnabled
+                    domStorageEnabled
+                  />
+                )}
+              </>
+            )}
+          </SafeAreaView>
+        </Modal>
       </Animated.View>
+
+      
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 100,
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 8 : 16,
-    paddingBottom: 20,
-    backgroundColor: COLORS.cardBg,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: COLORS.text,
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 15,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-  },
-  daySelectorContainer: {
-    marginTop: 16,
-    marginBottom: 16,
-    paddingHorizontal: 20,
-  },
-  daySelectorScroll: {
-    gap: 8,
-    paddingRight: 20,
-  },
-  dayButton: {
-    minWidth: 56,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.cardBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  dayButtonSelected: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  dayButtonToday: {
-    borderColor: COLORS.accent,
-    borderWidth: 2,
-  },
-  dayButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-  },
-  dayButtonTextSelected: {
-    color: COLORS.cardBg,
-  },
-  dayButtonTextToday: {
-    color: COLORS.accent,
-  },
-  todayIndicator: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: COLORS.accent,
-  },
-  summaryCard: {
-    marginHorizontal: 20,
-    marginBottom: 16,
-    padding: 20,
-    borderRadius: 16,
-  },
-  summaryHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    gap: 8,
-  },
-  summaryTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  summaryStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  summaryItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  summaryDivider: {
-    width: 1,
-    height: 40,
-    backgroundColor: COLORS.border,
-    marginHorizontal: 12,
-  },
-  summaryValue: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  summaryLabel: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-  },
-  noWorkoutsCard: {
-    marginHorizontal: 20,
-    alignItems: 'center',
-    paddingVertical: 48,
-    borderRadius: 16,
-  },
-  noWorkoutsText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  noWorkoutsSubtext: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    paddingHorizontal: 40,
-  },
-  workoutCard: {
-    marginHorizontal: 20,
-    marginBottom: 12,
-    padding: 20,
-    borderRadius: 16,
-  },
-  workoutHeader: {
-    marginBottom: 16,
-  },
-  workoutTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-    gap: 12,
-  },
-  workoutName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.text,
-    flex: 1,
-  },
-  completedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.successLight,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    gap: 4,
-  },
-  completedText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.success,
-  },
-  workoutDescription: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  workoutMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  metaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  metaText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-  },
-  difficultyBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  difficultyText: {
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'capitalize',
-  },
-  workoutActions: {
-    marginTop: 0,
-  },
-  activeWorkoutContainer: {
-    alignItems: 'center',
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  timerContainer: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  timerLabel: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 8,
-  },
-  timerText: {
-    fontSize: 40,
-    fontWeight: '700',
-    color: COLORS.primary,
-    letterSpacing: 2,
-  },
-  actionButtons: {
-    width: '100%',
-    gap: 8,
-  },
-  completeButton: {
-    width: '100%',
-    minHeight: 52,
-  },
-  cancelButton: {
-    width: '100%',
-    minHeight: 52,
-  },
-  startButton: {
-    width: '100%',
-    minHeight: 52,
-  },
-});

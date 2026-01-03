@@ -1315,7 +1315,7 @@ export default function AdminDashboardScreen() {
             </View>
 
             <View style={styles.headerTextContainer}>
-              <Text style={styles.headerTitle}>{gym?.name || 'Elite Fitness Hub'}</Text>
+              <Text style={styles.headerTitle}>{gym?.name || 'Creators Fitness Hub'}</Text>
               {gym?.location && (
                 <Text style={styles.headerLocation}>📍 {gym.location}</Text>
               )}
