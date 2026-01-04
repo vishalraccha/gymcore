@@ -12,6 +12,7 @@ import { Dumbbell } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import * as SplashScreen from 'expo-splash-screen';
 import { useTheme } from '@/contexts/ThemeContext';
+import logo from '@/assets/images/splash-icon.png';
 
 const { width, height } = Dimensions.get('window');
 
@@ -226,6 +227,11 @@ export default function AnimatedSplashScreen({ onFinish, userId, gymId }: Splash
       height: '100%',
       borderRadius: 70,
     },
+    defaultgymLogo: {
+      width: '100%',
+      height: '100%',
+      borderRadius: 100,
+    },
     defaultLogoWrapper: {
       width: 160,
       height: 160,
@@ -334,7 +340,11 @@ export default function AnimatedSplashScreen({ onFinish, userId, gymId }: Splash
           </View>
         ) : (
           <View style={styles.defaultLogoWrapper}>
-            <Dumbbell size={80} color={theme.colors.primary} strokeWidth={2.5} />
+            <Image
+              source={logo}
+              style={styles.defaultgymLogo}
+              resizeMode="contain"
+            />
           </View>
         )}
       </Animated.View>
