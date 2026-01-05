@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAppData } from '@/contexts/AppDataContext';
 import { supabase } from '@/lib/supabase';
 import { Workout, WorkoutLog } from '@/types/database';
 import { Card } from '@/components/ui/Card';
@@ -31,6 +32,7 @@ import {
 } from 'lucide-react-native';
 import { WebView } from 'react-native-webview';
 import { Linking, Modal } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -47,6 +49,7 @@ type Difficulty = 'all' | 'beginner' | 'intermediate' | 'advanced';
 export default function WorkoutsScreen() {
   const { user, profile } = useAuth();
   const { theme } = useTheme();
+  const { subscribe, emit } = useAppData();
   
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [filteredWorkouts, setFilteredWorkouts] = useState<Workout[]>([]);
@@ -72,6 +75,31 @@ const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null);
     return today === 0 ? 6 : today - 1;
   });
 
+  const loadData = useCallback(async () => {
+    try {
+      await Promise.all([
+        fetchWorkouts(), 
+        fetchTodayLogs(), 
+        checkTodayAttendance()
+      ]);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    }
+  }, [user, profile]);
+
+  // Listen for data refresh events from other tabs
+  useEffect(() => {
+    const unsubscribe = subscribe('data-refreshed', loadData);
+    return unsubscribe;
+  }, [subscribe, loadData]);
+
+  // Refresh when tab is focused
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
+
   useEffect(() => {
     if (user) {
       loadData();
@@ -90,18 +118,6 @@ const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null);
     };
   }, [timerInterval]);
 
-  const loadData = async () => {
-    try {
-      await Promise.all([
-        fetchWorkouts(), 
-        fetchTodayLogs(), 
-        checkTodayAttendance()
-      ]);
-    } catch (error) {
-      console.error('Error loading data:', error);
-    }
-  };
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -109,7 +125,7 @@ const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null);
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [loadData]);
 
   const checkTodayAttendance = async () => {
     if (!user || !profile?.gym_id) return;
@@ -271,6 +287,7 @@ const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null);
         setActiveWorkout(null);
         setWorkoutTimer(0);
         await fetchTodayLogs();
+        emit('data-refreshed'); // Notify other tabs
         
         Alert.alert(
           'Workout Completed! 🎉',

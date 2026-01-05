@@ -1070,139 +1070,157 @@ export default function GymProfileScreen() {
         </Card>
 
         {/* APP SUBSCRIPTION CARD */}
-        {hasGym && profile?.role === 'gym_owner' && (
-          <>
-            {subLoading ? (
-              <Card style={styles.subscriptionCard}>
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="small" color={theme.colors.primary} />
-                  <Text style={styles.loadingText}>Loading subscription...</Text>
-                </View>
-              </Card>
-            ) : hasActiveSubscription && subscriptionInfo && !isTrial ? (
-              // Active Subscription
-              <Card style={styles.subscriptionCard}>
-                <View style={styles.subscriptionHeader}>
-                  <View style={styles.crownIcon}>
-                    <Crown size={28} color="#FFFFFF" />
-                  </View>
-                  <View style={styles.subscriptionInfo}>
-                    <Text style={styles.subscriptionPlan}>{subscriptionInfo.plan_name}</Text>
-                    <View style={styles.subscriptionStatus}>
-                      <View style={styles.statusBadge}>
-                        <CheckCircle size={14} color="#FFFFFF" />
-                        <Text style={styles.statusText}>Active</Text>
-                      </View>
-                    </View>
-                  </View>
-                </View>
+        {/* APP SUBSCRIPTION CARD */}
+{hasGym && profile?.role === 'gym_owner' && (
+  <>
+    {subLoading ? (
+      <Card style={styles.subscriptionCard}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color="#FFFFFF" />
+          <Text style={[styles.loadingText, { color: '#FFFFFF' }]}>Loading subscription...</Text>
+        </View>
+      </Card>
+    ) : hasActiveSubscription && subscriptionInfo && !isTrial ? (
+      // Active Subscription
+      <Card style={styles.subscriptionCard}>
+        <View style={styles.subscriptionHeader}>
+          <View style={styles.crownIcon}>
+            <Crown size={28} color="#FFFFFF" />
+          </View>
+          <View style={styles.subscriptionInfo}>
+            <Text style={styles.subscriptionPlan}>{subscriptionInfo.plan_name}</Text>
+            <View style={styles.subscriptionStatus}>
+              <View style={styles.statusBadge}>
+                <CheckCircle size={14} color="#FFFFFF" />
+                <Text style={styles.statusText}>Active</Text>
+              </View>
+            </View>
+          </View>
+        </View>
 
-                <View style={styles.subscriptionGrid}>
-                  <View style={styles.subStatItem}>
-                    <Text style={styles.subStatLabel}>Amount Paid</Text>
-                    <Text style={styles.subStatValue}>{formatRupees(subscriptionInfo.plan_price)}</Text>
-                  </View>
-                  <View style={styles.subStatItem}>
-                    <Text style={styles.subStatLabel}>Days Remaining</Text>
-                    <Text style={styles.subStatValue}>{subscriptionInfo.days_remaining} days</Text>
-                  </View>
-                </View>
+        <View style={styles.subscriptionGrid}>
+          <View style={styles.subStatItem}>
+            <Text style={styles.subStatLabel}>Amount Paid</Text>
+            <Text style={styles.subStatValue}>{formatRupees(subscriptionInfo.plan_price)}</Text>
+          </View>
+          <View style={styles.subStatItem}>
+            <Text style={styles.subStatLabel}>Days Remaining</Text>
+            <Text style={styles.subStatValue}>{subscriptionInfo.days_remaining} days</Text>
+          </View>
+        </View>
 
-                <View style={styles.progressSection}>
-                  {/* <View style={styles.progressBar}>
-                    <View style={[styles.progressFill, { 
-                      width: `${Math.max(0, Math.min(100, (subscriptionInfo.days_remaining / (subscriptionInfo.days_remaining > 14 ? subscriptionInfo.days_remaining + 14 : 14)) * 100))}%` 
-                    }]} />
-                  </View> */}
-                  <Text style={styles.progressText}>
-                    Valid till {new Date(subscriptionInfo.end_date).toLocaleDateString('en-IN', {
-                      day: 'numeric',
-                      month: 'long',
-                      year: 'numeric'
-                    })}
-                  </Text>
-                </View>
-              </Card>
-            ) : hasActiveSubscription && isTrial ? (
-              // Trial Active
-              <Card style={StyleSheet.flatten([styles.subscriptionCard, { borderWidth: 2, borderColor: theme.colors.warning }])}>
-                <View style={styles.subscriptionHeader}>
-                  <View style={[styles.crownIcon, { backgroundColor: theme.colors.warning }]}>
-                    <Sparkles size={28} color="#FFFFFF" />
-                  </View>
-                  <View style={styles.subscriptionInfo}>
-                    <Text style={[styles.subscriptionPlan, { color: theme.colors.warning }]}>Free Trial Active</Text>
-                    <View style={styles.subscriptionStatus}>
-                      <View style={[styles.statusBadge, { backgroundColor: theme.colors.warning }]}>
-                        <Sparkles size={14} color="#FFFFFF" />
-                        <Text style={styles.statusText}>
-                          {subscriptionInfo?.days_remaining || 0} Days Left
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-                <Text style={styles.trialDescription}>
-                  Your free trial expires in {subscriptionInfo?.days_remaining || 0} days. Upgrade now to unlock all features.
+        <View style={styles.progressSection}>
+          <Text style={styles.progressText}>
+            Valid till {new Date(subscriptionInfo.end_date).toLocaleDateString('en-IN', {
+              day: 'numeric',
+              month: 'long',
+              year: 'numeric'
+            })}
+          </Text>
+        </View>
+
+        {/* Manage Subscription Button */}
+        <TouchableOpacity
+          style={[styles.upgradeButton, { 
+            marginTop: 16, 
+            backgroundColor: 'rgba(255,255,255,0.2)' 
+          }]}
+          onPress={() => setShowOwnerSubscriptionModal(true)}
+        >
+          <Crown size={18} color="#FFFFFF" />
+          <Text style={styles.upgradeButtonText}>Manage Subscription</Text>
+          <ArrowRight size={18} color="#FFFFFF" />
+        </TouchableOpacity>
+      </Card>
+    ) : hasActiveSubscription && isTrial ? (
+      // Trial Active
+      <Card style={StyleSheet.flatten([styles.subscriptionCard, { 
+        backgroundColor: theme.colors.warning,
+        borderWidth: 2, 
+        borderColor: theme.colors.warning 
+      }])}>
+        <View style={styles.subscriptionHeader}>
+          <View style={[styles.crownIcon, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+            <Sparkles size={28} color="#FFFFFF" />
+          </View>
+          <View style={styles.subscriptionInfo}>
+            <Text style={styles.subscriptionPlan}>Free Trial Active</Text>
+            <View style={styles.subscriptionStatus}>
+              <View style={[styles.statusBadge, { backgroundColor: 'rgba(255,255,255,0.3)' }]}>
+                <Sparkles size={14} color="#FFFFFF" />
+                <Text style={styles.statusText}>
+                  {subscriptionInfo?.days_remaining || 0} Days Left
                 </Text>
-                <TouchableOpacity
-                  style={[styles.upgradeButton, { marginTop: 16 }]}
-                  onPress={() => setShowOwnerSubscriptionModal(true)}
-                >
-                  <Crown size={18} color="#FFFFFF" />
-                  <Text style={styles.upgradeButtonText}>Upgrade to Pro</Text>
-                  <ArrowRight size={18} color="#FFFFFF" />
-                </TouchableOpacity>
-              </Card>
-            ) : (
-              // No Subscription
-              <Card style={styles.subscriptionCard}>
-                <View style={styles.subscriptionHeader}>
-                  <View style={[styles.crownIcon, { backgroundColor: theme.colors.textSecondary }]}>
-                    <Lock size={28} color="#FFFFFF" />
-                  </View>
-                  <View style={styles.subscriptionInfo}>
-                    <Text style={styles.subscriptionPlan}>No Active Subscription</Text>
-                    <Text style={styles.subscriptionSubtext}>Unlock all features</Text>
-                  </View>
-                </View>
-                <Text style={styles.trialDescription}>
-                  Subscribe to unlock all features including member management, analytics, and more.
-                </Text>
-                <TouchableOpacity
-                  style={[styles.upgradeButton, { marginTop: 16 }]}
-                  onPress={() => setShowOwnerSubscriptionModal(true)}
-                >
-                  <Crown size={18} color="#FFFFFF" />
-                  <Text style={styles.upgradeButtonText}>Upgrade to Pro</Text>
-                  <ArrowRight size={18} color="#FFFFFF" />
-                </TouchableOpacity>
-              </Card>
-            )}
+              </View>
+            </View>
+          </View>
+        </View>
+        <Text style={[styles.trialDescription, { color: 'rgba(255,255,255,0.9)' }]}>
+          Your free trial expires in {subscriptionInfo?.days_remaining || 0} days. Upgrade now to unlock all features.
+        </Text>
+        <TouchableOpacity
+          style={[styles.upgradeButton, { 
+            marginTop: 16, 
+            backgroundColor: '#FFFFFF' 
+          }]}
+          onPress={() => setShowOwnerSubscriptionModal(true)}
+        >
+          <Crown size={18} color={theme.colors.warning} />
+          <Text style={[styles.upgradeButtonText, { color: theme.colors.warning }]}>
+            Upgrade to Pro
+          </Text>
+          <ArrowRight size={18} color={theme.colors.warning} />
+        </TouchableOpacity>
+      </Card>
+    ) : (
+      // No Subscription
+      <Card style={styles.subscriptionCard}>
+        <View style={styles.subscriptionHeader}>
+          <View style={[styles.crownIcon, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+            <Lock size={28} color="#FFFFFF" />
+          </View>
+          <View style={styles.subscriptionInfo}>
+            <Text style={styles.subscriptionPlan}>No Active Subscription</Text>
+            <Text style={styles.subscriptionSubtext}>Unlock all features</Text>
+          </View>
+        </View>
+        <Text style={[styles.trialDescription, { color: 'rgba(255,255,255,0.9)' }]}>
+          Subscribe to unlock all features including member management, analytics, and more.
+        </Text>
+        <TouchableOpacity
+          style={[styles.upgradeButton, { marginTop: 16 }]}
+          onPress={() => setShowOwnerSubscriptionModal(true)}
+        >
+          <Crown size={18} color="#FFFFFF" />
+          <Text style={styles.upgradeButtonText}>Subscribe Now</Text>
+          <ArrowRight size={18} color="#FFFFFF" />
+        </TouchableOpacity>
+      </Card>
+    )}
 
-            {/* Recent Payments */}
-            {recentPayments.length > 0 && (
-              <Card style={styles.recentPaymentsCard}>
-                <Text style={styles.recentPaymentsTitle}>Recent Payments</Text>
-                {recentPayments.map((payment) => (
-                  <View key={payment.id} style={styles.paymentItem}>
-                    <View style={styles.paymentInfo}>
-                      <Text style={styles.paymentPlanName}>{payment.plan_name}</Text>
-                      <Text style={styles.paymentDate}>
-                        {new Date(payment.date).toLocaleDateString('en-IN', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric'
-                        })}
-                      </Text>
-                    </View>
-                    <Text style={styles.paymentAmount}>{formatRupees(payment.amount)}</Text>
-                  </View>
-                ))}
-              </Card>
-            )}
-          </>
-        )}
+    {/* Recent Payments */}
+    {recentPayments.length > 0 && (
+      <Card style={styles.recentPaymentsCard}>
+        <Text style={styles.recentPaymentsTitle}>Recent Payments</Text>
+        {recentPayments.map((payment) => (
+          <View key={payment.id} style={styles.paymentItem}>
+            <View style={styles.paymentInfo}>
+              <Text style={styles.paymentPlanName}>{payment.plan_name}</Text>
+              <Text style={styles.paymentDate}>
+                {new Date(payment.date).toLocaleDateString('en-IN', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric'
+                })}
+              </Text>
+            </View>
+            <Text style={styles.paymentAmount}>{formatRupees(payment.amount)}</Text>
+          </View>
+        ))}
+      </Card>
+    )}
+  </>
+)}
 
         {/* GYM DETAILS FORM */}
         <Card style={styles.formCard}>

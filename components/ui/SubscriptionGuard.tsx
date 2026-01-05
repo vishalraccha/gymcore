@@ -1,9 +1,11 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSubscription } from '../../contexts/SubscriptionContext';
-import { Ionicons } from '@expo/vector-icons';
+import { Lock } from 'lucide-react-native';
+import { useTheme } from '../../contexts/ThemeContext';
+import MemberSubscriptionModal from '../MemberSubscriptionModal';
 
 interface SubscriptionGuardProps {
   children: React.ReactNode;
@@ -17,10 +19,12 @@ export default function SubscriptionGuard({
   fallback,
 }: SubscriptionGuardProps) {
   const router = useRouter();
+  const { theme } = useTheme();
   const { profile } = useAuth();
   const { canAccessFeature, loading, subscriptionInfo } = useSubscription();
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
 
-  // Admin and trainers have full access
+  // Admin and gym owners have full access
   if (profile?.role === 'admin' || profile?.role === 'gym_owner') {
     return <>{children}</>;
   }
@@ -28,9 +32,11 @@ export default function SubscriptionGuard({
   // Show loading state
   if (loading) {
     return (
-      <View className="flex-1 justify-center items-center bg-gray-50">
-        <ActivityIndicator size="large" color="#3b82f6" />
-        <Text className="text-gray-600 mt-4">Checking subscription...</Text>
+      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>
+          Checking subscription...
+        </Text>
       </View>
     );
   }
@@ -44,49 +50,136 @@ export default function SubscriptionGuard({
     }
 
     return (
-      <View className="flex-1 justify-center items-center bg-gray-50 p-6">
-        <View className="bg-white rounded-3xl p-8 items-center shadow-lg max-w-md">
-          <View className="w-20 h-20 bg-blue-100 rounded-full items-center justify-center mb-6">
-            <Ionicons name="lock-closed" size={40} color="#3b82f6" />
-          </View>
-
-          <Text className="text-2xl font-bold text-gray-900 text-center mb-3">
-            Premium Feature
-          </Text>
-
-          <Text className="text-gray-600 text-center mb-6">
-            This feature requires an active subscription. Subscribe to unlock all
-            premium features and enhance your fitness journey.
-          </Text>
-
-          {subscriptionInfo && !subscriptionInfo.is_active && (
-            <View className="bg-orange-50 rounded-xl p-4 mb-6 w-full">
-              <Text className="text-orange-800 text-center font-medium">
-                Your subscription expired on{' '}
-                {new Date(subscriptionInfo.end_date).toLocaleDateString()}
-              </Text>
+      <>
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+          <View style={[styles.card, { backgroundColor: theme.colors.card }]}>
+            <View style={[styles.iconContainer, { backgroundColor: theme.colors.primary + '20' }]}>
+              <Lock size={40} color={theme.colors.primary} />
             </View>
-          )}
 
-          <TouchableOpacity
-            onPress={() => router.push('/plans')}
-            className="bg-blue-600 rounded-xl py-4 px-8 mb-3"
-          >
-            <Text className="text-white font-semibold text-base">
-              View Plans
+            <Text style={[styles.title, { color: theme.colors.text }]}>
+              Premium Feature
             </Text>
-          </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={() => router.back()}
-            className="py-2"
-          >
-            <Text className="text-gray-500">Go Back</Text>
-          </TouchableOpacity>
+            <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
+              This feature requires an active subscription. Subscribe to unlock all
+              premium features and enhance your fitness journey.
+            </Text>
+
+            {subscriptionInfo && !subscriptionInfo.is_active && (
+              <View style={[styles.warningBox, { backgroundColor: theme.colors.warning + '20' }]}>
+                <Text style={[styles.warningText, { color: theme.colors.warning }]}>
+                  Your subscription expired on{' '}
+                  {new Date(subscriptionInfo.end_date).toLocaleDateString()}
+                </Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              onPress={() => setShowSubscriptionModal(true)}
+              style={[styles.subscribeButton, { backgroundColor: theme.colors.primary }]}
+            >
+              <Text style={[styles.subscribeButtonText, { color: theme.colors.card }]}>
+                View Plans
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.backButton}
+            >
+              <Text style={[styles.backButtonText, { color: theme.colors.textSecondary }]}>
+                Go Back
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+
+        {/* Member Subscription Modal */}
+        <MemberSubscriptionModal
+          visible={showSubscriptionModal}
+          onClose={() => setShowSubscriptionModal(false)}
+          onSuccess={() => {
+            setShowSubscriptionModal(false);
+          }}
+        />
+      </>
     );
   }
 
   return <>{children}</>;
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+  },
+  card: {
+    borderRadius: 24,
+    padding: 32,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+    maxWidth: 400,
+    width: '100%',
+  },
+  iconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  description: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 24,
+  },
+  warningBox: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+    width: '100%',
+  },
+  warningText: {
+    textAlign: 'center',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  subscribeButton: {
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    marginBottom: 12,
+    width: '100%',
+    alignItems: 'center',
+  },
+  subscribeButtonText: {
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  backButton: {
+    paddingVertical: 8,
+  },
+  backButtonText: {
+    fontSize: 15,
+  },
+});

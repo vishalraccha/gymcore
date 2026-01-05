@@ -11,6 +11,7 @@ import {
   Platform,
   TouchableOpacity,
   Alert,
+  TextInput,
   Image
 } from "react-native";
 import { useAuth } from "@/contexts/AuthContext";
@@ -45,6 +46,19 @@ import {
 import InvoicesList from "@/components/InvoicesList";
 import MemberSubscriptionModal from "@/components/MemberSubscriptionModal";
 import { useSubscription } from "@/contexts/SubscriptionContext";
+import * as Notifications from 'expo-notifications';
+import { X, Calendar } from "lucide-react-native";
+import { supabase } from "@/lib/supabase";
+
+// Configure notifications
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -60,6 +74,15 @@ export default function ProfileScreen() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const [showLegalModal, setShowLegalModal] = useState(false);
+  const [legalModalContent, setLegalModalContent] = useState({ title: '', content: '' });
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+const [feedbackData, setFeedbackData] = useState({
+  type: 'other' as 'bug' | 'feature' | 'improvement' | 'other',
+  rating: 5,
+  message: '',
+});
+const [submittingFeedback, setSubmittingFeedback] = useState(false);
 
   // Show loading indicator when payments are being loaded (rendered inside return)
 
@@ -76,6 +99,7 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (profile?.id) {
       loadInvoices();
+      loadNotificationPreference();
     }
   }, [profile]);
 
@@ -100,6 +124,213 @@ export default function ProfileScreen() {
       setLoadingInvoices(false);
     }
   };
+  const submitFeedback = async () => {
+    if (!feedbackData.message.trim()) {
+      Alert.alert('Error', 'Please enter your feedback');
+      return;
+    }
+  
+    setSubmittingFeedback(true);
+  
+    try {
+      const { error } = await supabase.from('feedback').insert([{
+        user_id: profile?.id,
+        user_name: profile?.full_name || 'Anonymous',
+        user_email: profile?.email,
+        feedback_type: feedbackData.type,
+        rating: feedbackData.rating,
+        message: feedbackData.message.trim(),
+        device_info: `${Platform.OS} ${Platform.Version}`,
+      }]);
+  
+      if (error) throw error;
+  
+      Alert.alert(
+        'Thank You! 🎉',
+        'Your feedback has been submitted successfully. We appreciate your input!'
+      );
+  
+      // Reset form
+      setFeedbackData({
+        type: 'other',
+        rating: 5,
+        message: '',
+      });
+      setShowFeedbackModal(false);
+    } catch (error: any) {
+      console.error('Error submitting feedback:', error);
+      Alert.alert('Error', 'Failed to submit feedback. Please try again.');
+    } finally {
+      setSubmittingFeedback(false);
+    }
+  };
+
+  const loadNotificationPreference = async () => {
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('notifications_enabled')
+        .eq('id', profile?.id)
+        .single();
+
+      if (data) {
+        setNotifications(data.notifications_enabled ?? true);
+      }
+    } catch (error) {
+      console.error('Error loading notification preference:', error);
+    }
+  };
+
+  const toggleNotifications = async (value: boolean) => {
+    setNotifications(value);
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ notifications_enabled: value })
+        .eq('id', profile?.id);
+
+      if (error) throw error;
+
+      if (value) {
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+
+        if (finalStatus !== 'granted') {
+          Alert.alert(
+            'Permission Required',
+            'Please enable notifications in your device settings.'
+          );
+          setNotifications(false);
+          await supabase
+            .from('profiles')
+            .update({ notifications_enabled: false })
+            .eq('id', profile?.id);
+        } else {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: "Notifications Enabled ✅",
+              body: "You'll receive updates about workouts and subscriptions!",
+            },
+            trigger: null,
+          });
+        }
+      } else {
+        Alert.alert('Notifications Disabled', 'You can re-enable them anytime.');
+      }
+    } catch (error) {
+      console.error('Error toggling notifications:', error);
+      setNotifications(!value);
+      Alert.alert('Error', 'Failed to update notification settings');
+    }
+  };
+
+  const showLegalContent = (type: 'privacy' | 'terms' | 'support') => {
+    const contents = {
+      privacy: {
+        title: 'Privacy Policy',
+        content: `Last Updated: January 2026
+  
+  1. Information We Collect
+  - Account information (name, email, phone)
+  - Workout and attendance data
+  - Payment information (securely processed)
+  
+  2. How We Use Your Information
+  - Provide and improve services
+  - Process payments
+  - Send notifications
+  - Track fitness progress
+  
+  3. Data Security
+  We use industry-standard security measures to protect your data.
+  
+  4. Data Sharing
+  We do not sell your information. Shared only with:
+  - Your gym (workout data)
+  - Payment processors
+  - Service providers
+  
+  5. Your Rights
+  - Access your data
+  - Request corrections/deletion
+  - Opt-out of marketing
+  
+  Contact: privacy@gymcore.com`
+      },
+      terms: {
+        title: 'Terms of Service',
+        content: `Last Updated: January 2026
+  
+  1. Acceptance of Terms
+  By using GymCore, you agree to these terms.
+  
+  2. User Accounts
+  - Provide accurate information
+  - Keep account secure
+  - One account per person
+  - Must be 13+ years old
+  
+  3. Subscriptions
+  - Auto-renew unless cancelled
+  - Refunds per refund policy
+  - Prices subject to change
+  
+  4. User Conduct
+  - No harassment or abuse
+  - No unauthorized access
+  - Follow gym rules
+  - Respect other members
+  
+  5. Liability
+  - Use at your own risk
+  - Consult doctor before workouts
+  - GymCore not liable for injuries
+  
+  Contact: support@gymcore.com`
+      },
+      support: {
+        title: 'Help & Support',
+        content: `GymCore Support Center
+  
+  📧 Email Support
+  support@gymcore.com
+  Response time: 24-48 hours
+  
+  📱 Phone Support
+  +91 1800-GYMCORE
+  Mon-Fri: 9 AM - 6 PM IST
+  
+  💬 Live Chat
+  Available in app
+  Mon-Fri: 10 AM - 5 PM IST
+  
+  🌐 Help Center
+  Visit: help.gymcore.com
+  
+  Common Issues:
+  - Login problems: Reset password
+  - Payment issues: Check card details
+  - Subscription: Manage in Profile
+  - Technical bugs: Contact support
+  
+  Gym Owner Support:
+  - Member management help
+  - Payment setup assistance
+  - Technical integration
+  
+  We're here to help! 💪`
+      }
+    };
+
+    setLegalModalContent(contents[type]);
+    setShowLegalModal(true);
+  };
 
   const handleLogout = () => {
     setShowLogoutModal(true);
@@ -112,6 +343,59 @@ export default function ProfileScreen() {
     POINTS_PER_LEVEL - (safe.total_points % POINTS_PER_LEVEL);
 
   const styles = StyleSheet.create({
+    feedbackTypeButton: {
+      flex: 1,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      alignItems: 'center',
+    },
+    feedbackTypeButtonActive: {
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.colors.primary + '15',
+    },
+    feedbackTypeText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    feedbackTypeTextActive: {
+      color: theme.colors.primary,
+    },
+    ratingContainer: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 12,
+      marginVertical: 16,
+    },
+    ratingStar: {
+      padding: 4,
+    },
+    feedbackInput: {
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 15,
+      backgroundColor: theme.colors.card,
+      color: theme.colors.text,
+      minHeight: 120,
+      textAlignVertical: 'top',
+    },
+    submitButton: {
+      backgroundColor: theme.colors.primary,
+      paddingVertical: 16,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginTop: 16,
+    },
+    submitButtonText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '700',
+    },
     container: { flex: 1, backgroundColor: theme.colors.background },
     header: { padding: 24, paddingTop: Platform.OS === 'ios' ? 16 : 24 },
     title: { fontSize: 28, fontWeight: "bold", color: theme.colors.text },
@@ -604,6 +888,39 @@ export default function ProfileScreen() {
       color: theme.colors.card,
       fontWeight: "600",
     },
+
+    legalModalBox: {
+      width: '90%',
+      maxHeight: '80%',
+      backgroundColor: theme.colors.card,
+      borderRadius: 20,
+      overflow: 'hidden',
+    },
+    legalModalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 20,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    legalModalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+      flex: 1,
+    },
+    closeButton: {
+      padding: 4,
+    },
+    legalModalContent: {
+      padding: 20,
+    },
+    legalModalText: {
+      fontSize: 14,
+      color: theme.colors.text,
+      lineHeight: 22,
+    },
   });
 
   return (
@@ -751,8 +1068,19 @@ export default function ProfileScreen() {
                     </Text>
                   </View>
                 </View>
+                <View style={[styles.subscriptionDivider, { marginVertical: 12 }]} />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <Calendar size={16} color={theme.colors.textSecondary} />
+                  <Text style={[styles.planDescription, { marginTop: 0 }]}>
+                    Expires on {subscriptionInfo?.end_date ? new Date(subscriptionInfo.end_date).toLocaleDateString('en-IN', {
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric'
+                    }) : 'N/A'}
+                  </Text>
+                </View>
                 <Text style={styles.planDescription}>
-                  Your free trial expires in {subscriptionInfo?.days_remaining || 0} days. Upgrade now to continue enjoying premium features.
+                  Upgrade now to continue enjoying premium features after your trial expires.
                 </Text>
                 <TouchableOpacity
                   style={[styles.subscribeButton, { marginTop: 16 }]}
@@ -859,7 +1187,7 @@ export default function ProfileScreen() {
             right={
               <Switch
                 value={notifications}
-                onValueChange={setNotifications}
+                onValueChange={toggleNotifications}
                 trackColor={{ false: theme.colors.border, true: theme.colors.primaryLight }}
                 thumbColor={notifications ? theme.colors.primary : theme.colors.border}
               />
@@ -882,14 +1210,11 @@ export default function ProfileScreen() {
               showChevron
             />
           )}
-          <MenuItem
-            title="QR Code"
-            icon={<QrCode size={20} color={theme.colors.textSecondary} />}
-            showChevron
-          />
+
           <MenuItem
             title="Help & Support"
             icon={<CircleHelp size={20} color={theme.colors.textSecondary} />}
+            onPress={() => showLegalContent('support')}
             showChevron
           />
         </Card>
@@ -899,13 +1224,21 @@ export default function ProfileScreen() {
           <MenuItem
             title="Privacy Policy"
             icon={<Shield size={20} color={theme.colors.textSecondary} />}
+            onPress={() => showLegalContent('privacy')}
             showChevron
           />
           <MenuItem
             title="Terms of Service"
             icon={<FileText size={20} color={theme.colors.textSecondary} />}
+            onPress={() => showLegalContent('terms')}
             showChevron
           />
+          <MenuItem
+    title="Send Feedback"
+    icon={<Star size={20} color={theme.colors.textSecondary} />}
+    onPress={() => setShowFeedbackModal(true)}
+    showChevron
+  />
         </Card>
 
         {/* Logout Button */}
@@ -968,6 +1301,144 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Legal Content Modal */}
+      <Modal
+        visible={showLegalModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowLegalModal(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.legalModalBox, { backgroundColor: theme.colors.card }]}>
+            <View style={styles.legalModalHeader}>
+              <Text style={styles.legalModalTitle}>{legalModalContent.title}</Text>
+              <TouchableOpacity
+                onPress={() => setShowLegalModal(false)}
+                style={styles.closeButton}
+              >
+                <X size={24} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              style={styles.legalModalContent}
+              showsVerticalScrollIndicator={true}
+            >
+              <Text style={styles.legalModalText}>{legalModalContent.content}</Text>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Feedback Modal */}
+<Modal
+  visible={showFeedbackModal}
+  transparent
+  animationType="slide"
+  onRequestClose={() => setShowFeedbackModal(false)}
+>
+  <View style={styles.modalBackdrop}>
+    <View style={[styles.legalModalBox, { backgroundColor: theme.colors.card }]}>
+      <View style={styles.legalModalHeader}>
+        <Text style={styles.legalModalTitle}>Send Feedback</Text>
+        <TouchableOpacity
+          onPress={() => setShowFeedbackModal(false)}
+          style={styles.closeButton}
+        >
+          <X size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        style={styles.legalModalContent}
+        showsVerticalScrollIndicator={true}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={[styles.legalModalText, { marginBottom: 16 }]}>
+          We'd love to hear from you! Your feedback helps us improve.
+        </Text>
+
+        {/* Feedback Type */}
+        <Text style={[styles.legalModalText, { fontWeight: '600', marginBottom: 12 }]}>
+          Feedback Type
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 20 }}>
+          {[
+            { value: 'bug', label: '🐛 Bug' },
+            { value: 'feature', label: '✨ Feature' },
+            { value: 'improvement', label: '📈 Improve' },
+            { value: 'other', label: '💬 Other' },
+          ].map((type) => (
+            <TouchableOpacity
+              key={type.value}
+              style={[
+                styles.feedbackTypeButton,
+                feedbackData.type === type.value && styles.feedbackTypeButtonActive,
+              ]}
+              onPress={() => setFeedbackData({ ...feedbackData, type: type.value as any })}
+            >
+              <Text
+                style={[
+                  styles.feedbackTypeText,
+                  feedbackData.type === type.value && styles.feedbackTypeTextActive,
+                ]}
+              >
+                {type.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Rating */}
+        <Text style={[styles.legalModalText, { fontWeight: '600', marginBottom: 8 }]}>
+          Rate Your Experience
+        </Text>
+        <View style={styles.ratingContainer}>
+          {[1, 2, 3, 4, 5].map((star) => (
+            <TouchableOpacity
+              key={star}
+              style={styles.ratingStar}
+              onPress={() => setFeedbackData({ ...feedbackData, rating: star })}
+            >
+              <Star
+                size={32}
+                color={star <= feedbackData.rating ? theme.colors.warning : theme.colors.border}
+                fill={star <= feedbackData.rating ? theme.colors.warning : 'none'}
+              />
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Message */}
+        <Text style={[styles.legalModalText, { fontWeight: '600', marginBottom: 12 }]}>
+          Your Feedback *
+        </Text>
+        <TextInput
+          style={styles.feedbackInput}
+          placeholder="Tell us what you think..."
+          placeholderTextColor={theme.colors.textSecondary}
+          value={feedbackData.message}
+          onChangeText={(text) => setFeedbackData({ ...feedbackData, message: text })}
+          multiline
+          numberOfLines={6}
+        />
+
+        {/* Submit Button */}
+        <TouchableOpacity
+          style={[styles.submitButton, submittingFeedback && { opacity: 0.6 }]}
+          onPress={submitFeedback}
+          disabled={submittingFeedback}
+        >
+          {submittingFeedback ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.submitButtonText}>Submit Feedback</Text>
+          )}
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
+  </View>
+</Modal>
     </SafeAreaWrapper>
   );
 }

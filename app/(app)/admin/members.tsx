@@ -97,7 +97,7 @@ export default function MembersScreen() {
   const [showAddMember, setShowAddMember] = useState(false);
   const [showMemberDetails, setShowMemberDetails] = useState(false);
   const [selectedMember, setSelectedMember] = useState<MemberDetails | null>(null);
-  const [customStartDate, setCustomStartDate] = useState(new Date()); // Set to current date
+  const [customStartDate, setCustomStartDate] = useState(new Date().toISOString().split('T')[0]); // Set to current date
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [newMember, setNewMember] = useState({
     full_name: '',
@@ -561,7 +561,7 @@ export default function MembersScreen() {
           gym_id: profile.gym_id,
           assigned_by: profile.id,
           is_active: true,
-          start_date: new Date().toISOString().split('T')[0],
+          start_date: customStartDate,
         }]);
       }
 
@@ -573,8 +573,14 @@ export default function MembersScreen() {
           const paymentStatus = pending === 0 ? 'completed' : 'partial';
 
           // Use selected date (default is today)
-          const startDate = new Date(customStartDate);
-          startDate.setHours(0, 0, 0, 0); // Reset time to midnight
+          // Calculate dates without timezone issues
+          const startDateParts = customStartDate.split('-');
+          const startDate = new Date(
+            parseInt(startDateParts[0]),
+            parseInt(startDateParts[1]) - 1,
+            parseInt(startDateParts[2]),
+            12, 0, 0
+          );
 
           const endDate = new Date(startDate);
           endDate.setDate(endDate.getDate() + (selectedSubscription.duration_days || selectedSubscription.duration_months * 30));
@@ -584,9 +590,9 @@ export default function MembersScreen() {
             .insert([{
               user_id: userId,
               subscription_id: selectedSubscription.id,
-              start_date: startDate.toISOString().split('T')[0],
-              end_date: endDate.toISOString().split('T')[0],
-              custom_start_date: customStartDate.toISOString().split('T')[0],
+              start_date: customStartDate, // Store as YYYY-MM-DD string
+              end_date: endDate.toISOString().split('T')[0], // Store as YYYY-MM-DD string
+              custom_start_date: customStartDate,
               total_amount: selectedSubscription.price,
               paid_amount: received,
               amount_paid: received,
@@ -751,7 +757,10 @@ export default function MembersScreen() {
       }
     );
   };
-
+  const getDateAsISO = (dateString: string) => {
+    // Add time at start of day in UTC to avoid timezone issues
+    return new Date(dateString + 'T00:00:00.000Z').toISOString();
+  };
   const payPendingAmount = async () => {
     if (!selectedMember || !selectedMember.currentSubscription) {
       window.alert('No subscription found')
@@ -851,6 +860,7 @@ export default function MembersScreen() {
           payment_type: 'cash',
           amount: totalAmount,
           currency: 'INR',
+          start_date: getDateAsISO(customStartDate),
           tax_amount: 0,
           total_amount: totalAmount,
           remaining_amount: newPending,
@@ -948,7 +958,7 @@ export default function MembersScreen() {
         .insert([{
           user_id: selectedMember.id,
           subscription_id: renewSubscription.id,
-          start_date: startDate.toISOString().split('T')[0],
+          start_date: customStartDate,
           end_date: endDate.toISOString().split('T')[0],
           total_amount: renewSubscription.price,
           paid_amount: received,
@@ -2501,7 +2511,7 @@ export default function MembersScreen() {
                         <View style={styles.datePickerContent}>
                           <Calendar size={20} color={theme.colors.textSecondary} />
                           <Text style={styles.datePickerText}>
-                            {customStartDate.toLocaleDateString('en-IN', {
+                            {new Date(customStartDate + 'T12:00:00').toLocaleDateString('en-IN', {
                               day: '2-digit',
                               month: 'short',
                               year: 'numeric'
@@ -2515,10 +2525,9 @@ export default function MembersScreen() {
                           {Platform.OS === 'web' ? (
                             <input
                               type="date"
-                              value={customStartDate.toISOString().split('T')[0]}
+                              value={customStartDate}
                               onChange={(e) => {
-                                const selectedDate = new Date(e.target.value);
-                                setCustomStartDate(selectedDate);
+                                setCustomStartDate(e.target.value);
                                 setShowDatePicker(false);
                               }}
                               min="2020-01-01"
@@ -2527,8 +2536,7 @@ export default function MembersScreen() {
                                 padding: 16,
                                 fontSize: 16,
                                 borderRadius: 12,
-                                borderWidth: 1.5,
-                                borderColor: theme.colors.border,
+                                border: `1.5px solid ${theme.colors.border}`,
                                 backgroundColor: theme.colors.card,
                                 color: theme.colors.text,
                                 marginBottom: 16,
@@ -2536,13 +2544,16 @@ export default function MembersScreen() {
                             />
                           ) : (
                             <DateTimePicker
-                              value={customStartDate}
+                              value={new Date(customStartDate + 'T12:00:00')}
                               mode="date"
                               display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                               onChange={(event, selectedDate) => {
                                 setShowDatePicker(Platform.OS === 'ios');
                                 if (selectedDate) {
-                                  setCustomStartDate(selectedDate);
+                                  const year = selectedDate.getFullYear();
+                                  const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                                  const day = String(selectedDate.getDate()).padStart(2, '0');
+                                  setCustomStartDate(`${year}-${month}-${day}`);
                                 }
                               }}
                               minimumDate={new Date(2020, 0, 1)}
@@ -3178,7 +3189,7 @@ export default function MembersScreen() {
                                       gym_id: profile.gym_id,
                                       assigned_by: profile.id,
                                       is_active: true,
-                                      start_date: new Date().toISOString().split('T')[0],
+                                      start_date: customStartDate,
                                     },
                                   ]);
                                 }

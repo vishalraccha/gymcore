@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -38,8 +38,9 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { getUserPendingPayments } from '@/lib/pendingPayments';
 import { formatRupees } from '@/lib/currency';
 import { AlertCircle } from 'lucide-react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import Svg, { Circle } from 'react-native-svg';
+import { useAppData } from '@/contexts/AppDataContext';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width - 48;
@@ -47,11 +48,12 @@ const CARD_WIDTH = width - 48;
 export default function HomeScreen() {
   const { theme } = useTheme();
   const { profile, user, refreshProfile } = useAuth();
+  const { subscribe, emit } = useAppData();
   const [selectedDate, setSelectedDate] = useState(
     new Date().toISOString().split('T')[0]
   );
   const [isCheckedIn, setIsCheckedIn] = useState(false);
-  
+
   interface Attendance {
     id: string;
     user_id: string;
@@ -61,7 +63,7 @@ export default function HomeScreen() {
     attendance_date: string;
     duration_minutes: number | null;
   }
-  
+
   const [todayAttendance, setTodayAttendance] = useState<Attendance | null>(null);
   const [pendingPayments, setPendingPayments] = useState<any[]>([]);
   const [attendanceDates, setAttendanceDates] = useState<any>({});
@@ -76,14 +78,35 @@ export default function HomeScreen() {
     attendanceRate: 0,
   });
 
+  const refreshAllData = useCallback(async () => {
+    if (user) {
+      await Promise.all([
+        checkTodayAttendance(),
+        fetchAttendanceHistory(),
+        fetchMonthlyStats(),
+        refreshProfile(),
+        refreshStats(),
+        fetchPendingPayments(),
+      ]);
+    }
+  }, [user, selectedDate]);
+
+  // Listen for data refresh events from other tabs
+  useEffect(() => {
+    const unsubscribe = subscribe('data-refreshed', refreshAllData);
+    return unsubscribe;
+  }, [subscribe, refreshAllData]);
+
+  // Refresh when tab is focused
+  useFocusEffect(
+    useCallback(() => {
+      refreshAllData();
+    }, [refreshAllData])
+  );
+
   useEffect(() => {
     if (user) {
-      checkTodayAttendance();
-      fetchAttendanceHistory();
-      fetchMonthlyStats();
-      refreshProfile();
-      refreshStats();
-      fetchPendingPayments();
+      refreshAllData();
     }
   }, [user, selectedDate]);
 
@@ -108,7 +131,7 @@ export default function HomeScreen() {
       const currentYear = new Date().getFullYear();
       const firstDay = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
       const lastDay = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
-  
+
       const { data, error } = await supabase
         .from('attendance')
         .select('*')
@@ -116,14 +139,14 @@ export default function HomeScreen() {
         .gte('attendance_date', firstDay)
         .lte('attendance_date', lastDay)
         .not('check_out_time', 'is', null);
-  
+
       if (!error && data) {
         const totalWorkouts = data.length;
         const totalDuration = data.reduce((sum, att) => sum + (att.duration_minutes || 0), 0);
         const avgDuration = totalWorkouts > 0 ? Math.round(totalDuration / totalWorkouts) : 0;
         const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
         const attendanceRate = Math.round((totalWorkouts / daysInMonth) * 100);
-  
+
         setMonthlyStats({
           totalWorkouts,
           totalDuration,
@@ -145,7 +168,7 @@ export default function HomeScreen() {
         .select('attendance_date')
         .eq('user_id', user.id)
         .not('check_out_time', 'is', null);
-  
+
       if (!error && data) {
         const markedDates: any = {};
         data.forEach((record: any) => {
@@ -249,6 +272,9 @@ export default function HomeScreen() {
       await fetchAttendanceHistory();
       await fetchMonthlyStats();
       await refreshStats();
+      
+      // Emit event to refresh all tabs
+      emit('data-refreshed');
     } catch (error) {
       console.error('Error with check-in/out:', error);
       Alert.alert('Error', 'Failed to update attendance. Please try again.');
@@ -273,14 +299,14 @@ export default function HomeScreen() {
     };
   };
 
-  const CircularProgress = ({ 
-    value, 
-    maxValue, 
-    size = 100, 
-    strokeWidth = 10, 
-    color, 
-    label, 
-    unit 
+  const CircularProgress = ({
+    value,
+    maxValue,
+    size = 100,
+    strokeWidth = 10,
+    color,
+    label,
+    unit
   }: {
     value: number;
     maxValue: number;
@@ -323,16 +349,16 @@ export default function HomeScreen() {
             />
           </Svg>
           <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]}>
-            <Text style={{ 
-              fontSize: 20, 
-              fontWeight: '700', 
+            <Text style={{
+              fontSize: 20,
+              fontWeight: '700',
               color: theme.colors.text,
-              fontFamily: 'Inter-Bold' 
+              fontFamily: 'Inter-Bold'
             }}>
               {value}
             </Text>
-            <Text style={{ 
-              fontSize: 10, 
+            <Text style={{
+              fontSize: 10,
               color: theme.colors.textSecondary,
               fontFamily: 'Inter-Medium',
               marginTop: 2
@@ -341,8 +367,8 @@ export default function HomeScreen() {
             </Text>
           </View>
         </View>
-        <Text style={{ 
-          fontSize: 12, 
+        <Text style={{
+          fontSize: 12,
           color: theme.colors.text,
           fontFamily: 'Inter-SemiBold',
           marginTop: 6,
@@ -350,8 +376,8 @@ export default function HomeScreen() {
         }}>
           {label}
         </Text>
-        <Text style={{ 
-          fontSize: 10, 
+        <Text style={{
+          fontSize: 10,
           color: theme.colors.textSecondary,
           fontFamily: 'Inter-Regular',
           textAlign: 'center'
@@ -362,7 +388,7 @@ export default function HomeScreen() {
     );
   };
 
- 
+
 
   const greeting = getGreeting();
   const safeProfile = profile || {
@@ -391,14 +417,14 @@ export default function HomeScreen() {
       selectedColor: theme.colors.primary,
       customStyles: {
         container: {
-          backgroundColor: attendanceDates[selectedDate] 
-            ? theme.colors.success + '20' 
+          backgroundColor: attendanceDates[selectedDate]
+            ? theme.colors.success + '20'
             : theme.colors.primary,
           borderRadius: 16,
         },
         text: {
-          color: attendanceDates[selectedDate] 
-            ? theme.colors.success 
+          color: attendanceDates[selectedDate]
+            ? theme.colors.success
             : theme.colors.card,
           fontWeight: 'bold',
         },
@@ -506,7 +532,7 @@ export default function HomeScreen() {
       shadowRadius: 12,
       elevation: 5,
     },
-   
+
     statsRow: {
       flexDirection: 'row',
       gap: 12,
@@ -651,7 +677,7 @@ export default function HomeScreen() {
       paddingHorizontal: 24,
       gap: 16,
     },
-    
+
     carouselPageTitle: {
       fontSize: 22,
       fontWeight: '700',
@@ -694,7 +720,7 @@ export default function HomeScreen() {
       textAlign: 'center',
       lineHeight: 16,
     },
-    
+
     carouselDots: {
       flexDirection: 'row',
       justifyContent: 'center',
@@ -815,42 +841,42 @@ export default function HomeScreen() {
   return (
     <SafeAreaWrapper>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.header}>
-  <View style={styles.headerContent}>
-    {/* Left Side: Name + Gym */}
-    <View style={styles.headerLeft}>
-      <Text style={styles.name}>{safeProfile.full_name?.split(' ')[0] || 'User'}</Text>
-      {profile?.gym_id && gymData?.name && (
-        <Text style={styles.gymNameBelow}>{gymData.name}</Text>
-      )}
-    </View>
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            {/* Left Side: Name + Gym */}
+            <View style={styles.headerLeft}>
+              <Text style={styles.name}>{safeProfile.full_name?.split(' ')[0] || 'User'}</Text>
+              {profile?.gym_id && gymData?.name && (
+                <Text style={styles.gymNameBelow}>{gymData.name}</Text>
+              )}
+            </View>
 
-    {/* Right Side: Greeting */}
-    <View style={styles.greetingContainer}>
-      {greeting.icon}
-      <Text style={styles.greeting}>{greeting.text}</Text>
-    </View>
-  </View>
+            {/* Right Side: Greeting */}
+            <View style={styles.greetingContainer}>
+              {greeting.icon}
+              <Text style={styles.greeting}>{greeting.text}</Text>
+            </View>
+          </View>
 
-  {/* Stats Row Below */}
-  <View style={styles.statsRow}>
-    <View style={styles.quickStat}>
-      <Award size={24} color={theme.colors.primary} />
-      <Text style={styles.quickStatValue}>Lvl {safeProfile.level || 1}</Text>
-      <Text style={styles.quickStatLabel}>Level</Text>
-    </View>
-    <View style={styles.quickStat}>
-      <Flame size={24} color={theme.colors.warning} />
-      <Text style={styles.quickStatValue}>{safeProfile.current_streak || 0}</Text>
-      <Text style={styles.quickStatLabel}>Day Streak</Text>
-    </View>
-    <View style={styles.quickStat}>
-      <Target size={24} color={theme.colors.success} />
-      <Text style={styles.quickStatValue}>{safeProfile.total_points || 0}</Text>
-      <Text style={styles.quickStatLabel}>Points</Text>
-    </View>
-  </View>
-</View>
+          {/* Stats Row Below */}
+          <View style={styles.statsRow}>
+            <View style={styles.quickStat}>
+              <Award size={24} color={theme.colors.primary} />
+              <Text style={styles.quickStatValue}>Lvl {safeProfile.level || 1}</Text>
+              <Text style={styles.quickStatLabel}>Level</Text>
+            </View>
+            <View style={styles.quickStat}>
+              <Flame size={24} color={theme.colors.warning} />
+              <Text style={styles.quickStatValue}>{safeProfile.current_streak || 0}</Text>
+              <Text style={styles.quickStatLabel}>Day Streak</Text>
+            </View>
+            <View style={styles.quickStat}>
+              <Target size={24} color={theme.colors.success} />
+              <Text style={styles.quickStatValue}>{safeProfile.total_points || 0}</Text>
+              <Text style={styles.quickStatLabel}>Points</Text>
+            </View>
+          </View>
+        </View>
 
         {pendingPayments.length > 0 && (
           <Card style={styles.pendingPaymentBanner}>
@@ -873,7 +899,10 @@ export default function HomeScreen() {
                 </View>
                 <Button
                   title="Pay Now"
-                  onPress={() => router.push('/(app)/(tabs)/plans')}
+                  onPress={() => {
+                    // Open member subscription modal instead
+                    Alert.alert('Payment', 'Please go to Profile > Manage Subscription to make payments');
+                  }}
                   variant="primary"
                   style={styles.payNowButton}
                 />
@@ -890,214 +919,215 @@ export default function HomeScreen() {
               ) : (
                 <LogIn size={28} color={theme.colors.success} />
               )}
-              </View>
-        <View style={styles.checkInInfo}>
-          <Text style={styles.checkInTitle}>
-            {isCheckedIn ? "You're Checked In!" : 'Ready to Workout?'}
-          </Text>
-          <Text style={styles.checkInSubtitle}>
-            {isCheckedIn
-              ? "Don't forget to check out when you're done"
-              : 'Check in to start tracking your session'}
-          </Text>
+            </View>
+            <View style={styles.checkInInfo}>
+              <Text style={styles.checkInTitle}>
+                {isCheckedIn ? "You're Checked In!" : 'Ready to Workout?'}
+              </Text>
+              <Text style={styles.checkInSubtitle}>
+                {isCheckedIn
+                  ? "Don't forget to check out when you're done"
+                  : 'Check in to start tracking your session'}
+              </Text>
+            </View>
+          </View>
+          <Button
+            title={isCheckedIn ? 'Check Out' : 'Check In'}
+            onPress={handleCheckInOut}
+            variant={isCheckedIn ? 'outline' : 'primary'}
+            style={styles.checkInButton}
+          />
+        </Card>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Performance Dashboard</Text>
         </View>
-      </View>
-      <Button
-        title={isCheckedIn ? 'Check Out' : 'Check In'}
-        onPress={handleCheckInOut}
-        variant={isCheckedIn ? 'outline' : 'primary'}
-        style={styles.checkInButton}
-      />
-    </Card>
+        {/* Today's Performance Stats */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Today's Performance</Text>
+        </View>
 
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>Performance Dashboard</Text>
-    </View>
-    {/* Today's Performance Stats */}
-    <View style={styles.sectionHeader}>
-  <Text style={styles.sectionTitle}>Today's Performance</Text>
-</View>
+        <View style={styles.performanceContainer}>
+          <View style={styles.performanceRow}>
+            <Card style={[styles.statCardLarge, { backgroundColor: theme.colors.error + '10' }]}>
+              <View style={[styles.statIconBox, { backgroundColor: theme.colors.error + '20' }]}>
+                <Flame size={32} color={theme.colors.error} />
+              </View>
+              <View style={styles.statContent}>
+                <Text style={[styles.statValueLarge, { color: theme.colors.text }]}>
+                  {Math.round(safeStats.calories_burned || 0)}
+                </Text>
+                <Text style={[styles.statUnitLarge, { color: theme.colors.textSecondary }]}>
+                  kcal burned
+                </Text>
+              </View>
+            </Card>
 
-<View style={styles.performanceContainer}>
-  <View style={styles.performanceRow}>
-    <Card style={[styles.statCardLarge, { backgroundColor: theme.colors.error + '10' }]}>
-      <View style={[styles.statIconBox, { backgroundColor: theme.colors.error + '20' }]}>
-        <Flame size={32} color={theme.colors.error} />
-      </View>
-      <View style={styles.statContent}>
-        <Text style={[styles.statValueLarge, { color: theme.colors.text }]}>
-          {Math.round(safeStats.calories_burned || 0)}
-        </Text>
-        <Text style={[styles.statUnitLarge, { color: theme.colors.textSecondary }]}>
-          kcal burned
-        </Text>
-      </View>
-    </Card>
+            <Card style={[styles.statCardLarge, { backgroundColor: theme.colors.accent + '10' }]}>
+              <View style={[styles.statIconBox, { backgroundColor: theme.colors.accent + '20' }]}>
+                <Clock size={32} color={theme.colors.accent} />
+              </View>
+              <View style={styles.statContent}>
+                <Text style={[styles.statValueLarge, { color: theme.colors.text }]}>
+                  {safeStats.workout_duration || 0}
+                </Text>
+                <Text style={[styles.statUnitLarge, { color: theme.colors.textSecondary }]}>
+                  minutes
+                </Text>
+              </View>
+            </Card>
+          </View>
 
-    <Card style={[styles.statCardLarge, { backgroundColor: theme.colors.accent + '10' }]}>
-      <View style={[styles.statIconBox, { backgroundColor: theme.colors.accent + '20' }]}>
-        <Clock size={32} color={theme.colors.accent} />
-      </View>
-      <View style={styles.statContent}>
-        <Text style={[styles.statValueLarge, { color: theme.colors.text }]}>
-          {safeStats.workout_duration || 0}
-        </Text>
-        <Text style={[styles.statUnitLarge, { color: theme.colors.textSecondary }]}>
-          minutes
-        </Text>
-      </View>
-    </Card>
-  </View>
+          <View style={styles.performanceRow}>
+            <Card style={[styles.statCardLarge, { backgroundColor: theme.colors.success + '10' }]}>
+              <View style={[styles.statIconBox, { backgroundColor: theme.colors.success + '20' }]}>
+                <Dumbbell size={32} color={theme.colors.success} />
+              </View>
+              <View style={styles.statContent}>
+                <Text style={[styles.statValueLarge, { color: theme.colors.text }]}>
+                  {safeStats.workouts_completed || 0}
+                </Text>
+                <Text style={[styles.statUnitLarge, { color: theme.colors.textSecondary }]}>
+                  workouts
+                </Text>
+              </View>
+            </Card>
 
-  <View style={styles.performanceRow}>
-    <Card style={[styles.statCardLarge, { backgroundColor: theme.colors.success + '10' }]}>
-      <View style={[styles.statIconBox, { backgroundColor: theme.colors.success + '20' }]}>
-        <Dumbbell size={32} color={theme.colors.success} />
-      </View>
-      <View style={styles.statContent}>
-        <Text style={[styles.statValueLarge, { color: theme.colors.text }]}>
-          {safeStats.workouts_completed || 0}
-        </Text>
-        <Text style={[styles.statUnitLarge, { color: theme.colors.textSecondary }]}>
-          workouts
-        </Text>
-      </View>
-    </Card>
+            <Card style={[styles.statCardLarge, { backgroundColor: theme.colors.warning + '10' }]}>
+              <View style={[styles.statIconBox, { backgroundColor: theme.colors.warning + '20' }]}>
+                <TrendingUp size={32} color={theme.colors.warning} />
+              </View>
+              <View style={styles.statContent}>
+                <Text style={[styles.statValueLarge, { color: theme.colors.text }]}>
+                  {safeProfile.current_streak || 0}
+                </Text>
+                <Text style={[styles.statUnitLarge, { color: theme.colors.textSecondary }]}>
+                  Max days streak
+                </Text>
+              </View>
+            </Card>
+          </View>
 
-    <Card style={[styles.statCardLarge, { backgroundColor: theme.colors.warning + '10' }]}>
-      <View style={[styles.statIconBox, { backgroundColor: theme.colors.warning + '20' }]}>
-        <TrendingUp size={32} color={theme.colors.warning} />
-      </View>
-      <View style={styles.statContent}>
-        <Text style={[styles.statValueLarge, { color: theme.colors.text }]}>
-          {safeProfile.current_streak || 0}
-        </Text>
-        <Text style={[styles.statUnitLarge, { color: theme.colors.textSecondary }]}>
-          Max days streak
-        </Text>
-      </View>
-    </Card>
-  </View>
+          {/* Monthly Stats in smaller format */}
+          <Card style={styles.monthlyStatsCard}>
+            <Text style={[styles.monthlyStatsTitle, { color: theme.colors.text }]}>
+              This Month
+            </Text>
+            <View style={styles.monthlyStatsRow}>
+              <View style={styles.monthlyStatItem}>
+                <Text style={[styles.monthlyStatValue, { color: theme.colors.text }]}>
+                  {monthlyStats.totalWorkouts}
+                </Text>
+                <Text style={[styles.monthlyStatLabel, { color: theme.colors.textSecondary }]}>
+                  Total Workouts
+                </Text>
+              </View>
+              <View style={styles.monthlyStatDivider} />
+              <View style={styles.monthlyStatItem}>
+                <Text style={[styles.monthlyStatValue, { color: theme.colors.text }]}>
+                  {monthlyStats.totalDuration}m
+                </Text>
+                <Text style={[styles.monthlyStatLabel, { color: theme.colors.textSecondary }]}>
+                  Total Time
+                </Text>
+              </View>
+              <View style={styles.monthlyStatDivider} />
+              <View style={styles.monthlyStatItem}>
+                <Text style={[styles.monthlyStatValue, { color: theme.colors.text }]}>
+                  {monthlyStats.attendanceRate}%
+                </Text>
+                <Text style={[styles.monthlyStatLabel, { color: theme.colors.textSecondary }]}>
+                  Attendance
+                </Text>
+              </View>
+            </View>
+          </Card>
+        </View>
 
-  {/* Monthly Stats in smaller format */}
-  <Card style={styles.monthlyStatsCard}>
-    <Text style={[styles.monthlyStatsTitle, { color: theme.colors.text }]}>
-      This Month
-    </Text>
-    <View style={styles.monthlyStatsRow}>
-      <View style={styles.monthlyStatItem}>
-        <Text style={[styles.monthlyStatValue, { color: theme.colors.text }]}>
-          {monthlyStats.totalWorkouts}
-        </Text>
-        <Text style={[styles.monthlyStatLabel, { color: theme.colors.textSecondary }]}>
-          Total Workouts
-        </Text>
-      </View>
-      <View style={styles.monthlyStatDivider} />
-      <View style={styles.monthlyStatItem}>
-        <Text style={[styles.monthlyStatValue, { color: theme.colors.text }]}>
-          {monthlyStats.totalDuration}m
-        </Text>
-        <Text style={[styles.monthlyStatLabel, { color: theme.colors.textSecondary }]}>
-          Total Time
-        </Text>
-      </View>
-      <View style={styles.monthlyStatDivider} />
-      <View style={styles.monthlyStatItem}>
-        <Text style={[styles.monthlyStatValue, { color: theme.colors.text }]}>
-          {monthlyStats.attendanceRate}%
-        </Text>
-        <Text style={[styles.monthlyStatLabel, { color: theme.colors.textSecondary }]}>
-          Attendance
-        </Text>
-      </View>
-    </View>
-  </Card>
-</View>
+        {/* Nutrition Progress */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Nutrition Progress</Text>
+        </View>
 
-{/* Nutrition Progress */}
-<View style={styles.sectionHeader}>
-  <Text style={styles.sectionTitle}>Nutrition Progress</Text>
-</View>
+        <Card style={styles.nutritionCard}>
+          <View style={styles.nutritionGrid}>
+            <CircularProgress
+              value={safeStats.calories_consumed || 0}
+              maxValue={2000}
+              size={100}
+              strokeWidth={10}
+              color={theme.colors.primary}
+              label="Calories"
+              unit="kcal"
+            />
+            <CircularProgress
+              value={safeStats.protein_consumed || 0}
+              maxValue={150}
+              size={100}
+              strokeWidth={10}
+              color={theme.colors.success}
+              label="Protein"
+              unit="g"
+            />
+            <CircularProgress
+              value={safeStats.carbs_consumed || 0}
+              maxValue={250}
+              size={100}
+              strokeWidth={10}
+              color={theme.colors.warning}
+              label="Carbs"
+              unit="g"
+            />
+            <CircularProgress
+              value={safeStats.fat_consumed || 0}
+              maxValue={65}
+              size={100}
+              strokeWidth={10}
+              color={theme.colors.error}
+              label="Fat"
+              unit="g"
+            />
+          </View>
+        </Card>
 
-<Card style={styles.nutritionCard}>
-  <View style={styles.nutritionGrid}>
-    <CircularProgress
-      value={safeStats.calories_consumed || 0}
-      maxValue={2000}
-      size={100}
-      strokeWidth={10}
-      color={theme.colors.primary}
-      label="Calories"
-      unit="kcal"
-    />
-    <CircularProgress
-      value={safeStats.protein_consumed || 0}
-      maxValue={150}
-      size={100}
-      strokeWidth={10}
-      color={theme.colors.success}
-      label="Protein"
-      unit="g"
-    />
-    <CircularProgress
-      value={safeStats.carbs_consumed || 0}
-      maxValue={250}
-      size={100}
-      strokeWidth={10}
-      color={theme.colors.warning}
-      label="Carbs"
-      unit="g"
-    />
-    <CircularProgress
-      value={safeStats.fat_consumed || 0}
-      maxValue={65}
-      size={100}
-      strokeWidth={10}
-      color={theme.colors.error}
-      label="Fat"
-      unit="g"
-    />
-  </View>
-</Card>
-
-<Card style={styles.calendarCard}>
-  <View style={styles.calendarHeader}>
-    <Text style={styles.cardTitle}>Progress Calendar</Text>
-    <Text style={styles.calendarSubtitle}>
-      Days with checkmarks show completed workouts
-    </Text>
-  </View>
-        <LazyCalendar
-    current={selectedDate}
-    onDayPress={(day) => setSelectedDate(day.dateString)}
-    markedDates={markedDates}
-    markingType="custom"
-    enableSwipeMonths={true}
-    theme={{
-      backgroundColor: theme.colors.card,
-      calendarBackground: theme.colors.card,
-      textSectionTitleColor: theme.colors.textSecondary,
-      selectedDayBackgroundColor: theme.colors.primary,
-      selectedDayTextColor: theme.colors.card,
-      todayTextColor: theme.colors.primary,
-      dayTextColor: theme.colors.text,
-      textDisabledColor: theme.colors.border,
-      dotColor: theme.colors.success,
-      selectedDotColor: theme.colors.card,
-      arrowColor: theme.colors.primary,
-      disabledArrowColor: theme.colors.border,
-      monthTextColor: theme.colors.text,
-      indicatorColor: theme.colors.primary,
-      textDayFontFamily: 'Inter-Regular',
-      textMonthFontFamily: 'Inter-Bold',
-      textDayHeaderFontFamily: 'Inter-SemiBold',
-      textDayFontSize: 16,
-      textMonthFontSize: 18,
-      textDayHeaderFontSize: 14,
-    }}
-  />
-</Card>
-  </ScrollView>
-</SafeAreaWrapper>
-  )}
+        <Card style={styles.calendarCard}>
+          <View style={styles.calendarHeader}>
+            <Text style={styles.cardTitle}>Progress Calendar</Text>
+            <Text style={styles.calendarSubtitle}>
+              Days with checkmarks show completed workouts
+            </Text>
+          </View>
+          <LazyCalendar
+            current={selectedDate}
+            onDayPress={(day) => setSelectedDate(day.dateString)}
+            markedDates={markedDates}
+            markingType="custom"
+            enableSwipeMonths={true}
+            theme={{
+              backgroundColor: theme.colors.card,
+              calendarBackground: theme.colors.card,
+              textSectionTitleColor: theme.colors.textSecondary,
+              selectedDayBackgroundColor: theme.colors.primary,
+              selectedDayTextColor: theme.colors.card,
+              todayTextColor: theme.colors.primary,
+              dayTextColor: theme.colors.text,
+              textDisabledColor: theme.colors.border,
+              dotColor: theme.colors.success,
+              selectedDotColor: theme.colors.card,
+              arrowColor: theme.colors.primary,
+              disabledArrowColor: theme.colors.border,
+              monthTextColor: theme.colors.text,
+              indicatorColor: theme.colors.primary,
+              textDayFontFamily: 'Inter-Regular',
+              textMonthFontFamily: 'Inter-Bold',
+              textDayHeaderFontFamily: 'Inter-SemiBold',
+              textDayFontSize: 16,
+              textMonthFontSize: 18,
+              textDayHeaderFontSize: 14,
+            }}
+          />
+        </Card>
+      </ScrollView>
+    </SafeAreaWrapper>
+  )
+}

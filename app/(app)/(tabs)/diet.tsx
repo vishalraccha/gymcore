@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, Modal, TouchableOpacity, Alert, Platform, RefreshControl } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAppData } from '@/contexts/AppDataContext';
 import { supabase } from '@/lib/supabase';
 import { DietLog } from '@/types/database';
 import { Card } from '@/components/ui/Card';
@@ -11,10 +12,12 @@ import SafeAreaWrapper from "@/components/SafeAreaWrapper";
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DietChecklist from '@/components/DietChecklist';
+import { useFocusEffect } from 'expo-router';
 
 export default function DietScreen() {
   const { theme } = useTheme();
   const { user, profile } = useAuth();
+  const { subscribe, emit } = useAppData();
   const insets = useSafeAreaInsets();
   const [dietLogs, setDietLogs] = useState<DietLog[]>([]);
   const [dietPlans, setDietPlans] = useState<any[]>([]);
@@ -53,9 +56,25 @@ export default function DietScreen() {
     snack: { icon: '🍎', color: theme.colors.error, name: 'Snacks' },
   };
 
+  const refreshData = useCallback(async () => {
+    await Promise.all([fetchTodayDiet(), fetchDietPlans()]);
+  }, [user]);
+
+  // Listen for data refresh events from other tabs
   useEffect(() => {
-    fetchTodayDiet();
-    fetchDietPlans();
+    const unsubscribe = subscribe('data-refreshed', refreshData);
+    return unsubscribe;
+  }, [subscribe, refreshData]);
+
+  // Refresh when tab is focused
+  useFocusEffect(
+    useCallback(() => {
+      refreshData();
+    }, [refreshData])
+  );
+
+  useEffect(() => {
+    refreshData();
   }, []);
 
   useEffect(() => {
@@ -187,6 +206,7 @@ export default function DietScreen() {
         });
         setShowAddMeal(false);
         await fetchTodayDiet();
+        emit('data-refreshed'); // Notify other tabs
         Alert.alert('Success! 🎉', 'Meal logged successfully!');
       }
     } catch (error) {

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Modal,
   View,
@@ -10,6 +10,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Lock, Crown, Zap, CheckCircle, X } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
+import MemberSubscriptionModal from '@/components/MemberSubscriptionModal';
 
 interface PremiumLockModalProps {
   visible: boolean;
@@ -24,78 +25,92 @@ export default function PremiumLockModal({
 }: PremiumLockModalProps) {
   const router = useRouter();
   const { theme } = useTheme();
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+
 
   const handleViewPlans = () => {
     onClose();
-    router.push('/plans');
+    setShowSubscriptionModal(true);
   };
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <View style={styles.modalContainer}>
-          <Pressable onPress={(e) => e.stopPropagation()}>
-            <View style={[styles.modalContent, { backgroundColor: theme.colors.card }]}>
-              {/* Close Button */}
-              <TouchableOpacity 
-                style={[styles.closeButton, { backgroundColor: theme.colors.border }]}
-                onPress={onClose}
-              >
-                <X size={24} color={theme.colors.textSecondary} />
-              </TouchableOpacity>
-
-              {/* Icon */}
-              <View style={styles.iconContainer}>
-                <View style={[styles.iconBackground, { backgroundColor: theme.colors.primaryLight + '30' }]}>
-                  <Lock size={32} color={theme.colors.primary} />
+    <>
+      <Modal
+        visible={visible}
+        transparent
+        animationType="fade"
+        onRequestClose={onClose}
+      >
+        <Pressable style={styles.backdrop} onPress={onClose}>
+          <View style={styles.modalContainer}>
+            <Pressable onPress={(e) => e.stopPropagation()}>
+              <View style={[styles.modalContent, { backgroundColor: theme.colors.card }]}>
+                {/* Close Button */}
+                <TouchableOpacity 
+                  style={[styles.closeButton, { backgroundColor: theme.colors.border }]}
+                  onPress={onClose}
+                >
+                  <X size={24} color={theme.colors.textSecondary} />
+                </TouchableOpacity>
+  
+                {/* Icon */}
+                <View style={styles.iconContainer}>
+                  <View style={[styles.iconBackground, { backgroundColor: theme.colors.primaryLight + '30' }]}>
+                    <Lock size={32} color={theme.colors.primary} />
+                  </View>
                 </View>
+  
+                {/* Title */}
+                <View style={styles.titleContainer}>
+                  <Crown size={20} color={theme.colors.warning} />
+                  <Text style={[styles.title, { color: theme.colors.text }]}>Premium Feature</Text>
+                </View>
+  
+                {/* Description */}
+                <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
+                  Subscribe to unlock {feature} and get access to all premium features
+                </Text>
+  
+                {/* Features List */}
+                <View style={styles.featuresList}>
+                  <FeatureItem text="Unlimited Workouts" />
+                  <FeatureItem text="Personalized Diet Plans" />
+                  <FeatureItem text="Progress Analytics" />
+                  <FeatureItem text="Premium Support" />
+                </View>
+  
+                {/* CTA Button */}
+                <TouchableOpacity
+                  style={[styles.premiumButton, { backgroundColor: theme.colors.primary }]}
+                  onPress={handleViewPlans}
+                >
+                  <Zap size={20} color={theme.colors.card} />
+                  <Text style={[styles.premiumButtonText, { color: theme.colors.card }]}>View Plans</Text>
+                </TouchableOpacity>
+  
+                {/* Cancel Button */}
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={onClose}
+                >
+                  <Text style={[styles.cancelButtonText, { color: theme.colors.textSecondary }]}>Maybe Later</Text>
+                </TouchableOpacity>
               </View>
-
-              {/* Title */}
-              <View style={styles.titleContainer}>
-                <Crown size={20} color={theme.colors.warning} />
-                <Text style={[styles.title, { color: theme.colors.text }]}>Premium Feature</Text>
-              </View>
-
-              {/* Description */}
-              <Text style={[styles.description, { color: theme.colors.textSecondary }]}>
-                Subscribe to unlock {feature} and get access to all premium features
-              </Text>
-
-              {/* Features List */}
-              <View style={styles.featuresList}>
-                <FeatureItem text="Unlimited Workouts" />
-                <FeatureItem text="Personalized Diet Plans" />
-                <FeatureItem text="Progress Analytics" />
-                <FeatureItem text="Premium Support" />
-              </View>
-
-              {/* CTA Button */}
-              <TouchableOpacity
-                style={[styles.premiumButton, { backgroundColor: theme.colors.primary }]}
-                onPress={handleViewPlans}
-              >
-                <Zap size={20} color={theme.colors.card} />
-                <Text style={[styles.premiumButtonText, { color: theme.colors.card }]}>View Plans</Text>
-              </TouchableOpacity>
-
-              {/* Cancel Button */}
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={onClose}
-              >
-                <Text style={[styles.cancelButtonText, { color: theme.colors.textSecondary }]}>Maybe Later</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </View>
-      </Pressable>
-    </Modal>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+  
+      {/* Member Subscription Modal */}
+      <MemberSubscriptionModal
+        visible={showSubscriptionModal}
+        onClose={() => setShowSubscriptionModal(false)}
+        onSuccess={() => {
+          setShowSubscriptionModal(false);
+          // Optionally refresh subscription status
+        }}
+      />
+    </>
   );
 }
 
