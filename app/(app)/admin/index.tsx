@@ -978,6 +978,7 @@ amount: sub.paid_amount || 0,
       shadowRadius: 16,
       elevation: 8,
       overflow: 'hidden',
+      marginBottom:18,
     },
     carouselCardHeader: {
       padding: 24,
@@ -987,6 +988,7 @@ amount: sub.paid_amount || 0,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 16,
+      marginBottom:10,
     },
     carouselIconContainer: {
       width: 56,
@@ -1704,7 +1706,7 @@ amount: sub.paid_amount || 0,
                       {member.rank <= 3 ? (
                         <Trophy size={24} color="#FFFFFF" />
                       ) : (
-                        <Text style={styles.rankNumber}>#{member.rank}</Text>
+                        <Text style={styles.rankNumber}>{member.rank}</Text>
                       )}
                     </View>
 
@@ -1725,12 +1727,7 @@ amount: sub.paid_amount || 0,
                             {member.totalWorkouts}
                           </Text>
                         </View>
-                        <View style={styles.statBadge}>
-                          <Flame size={14} color={theme.colors.error} />
-                          <Text style={styles.statBadgeText}>
-                            {(member.totalCalories / 1000).toFixed(1)}k
-                          </Text>
-                        </View>
+                        
                         <View style={styles.statBadge}>
                           <Zap size={14} color={theme.colors.warning} />
                           <Text style={styles.statBadgeText}>

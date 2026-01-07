@@ -11,6 +11,8 @@ import {
   TouchableOpacity,
   Animated,
   FlatList,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -39,6 +41,12 @@ import {
   CreditCard,
   Award,
   BarChart3,
+
+  ArrowUpCircle,
+  ArrowDownCircle,
+  ChevronDown,
+  Plus,
+  X,
 } from 'lucide-react-native';
 
 interface Analytics {
@@ -64,6 +72,32 @@ interface Analytics {
   completionRate: number;
   revenueGrowth: number;
   memberChurnRate: number;
+  totalIncome: number;
+  monthlyIncome: number;
+  totalExpense: number;
+  monthlyExpense: number;
+  netProfit: number;
+  monthlyNetProfit: number;
+}
+
+interface IncomeItem {
+  id: string;
+  name: string;
+  type: string;
+  amount: number;
+  payment_method: string;
+  description: string;
+  income_date: string;
+}
+
+interface ExpenseItem {
+  id: string;
+  name: string;
+  type: string;
+  amount: number;
+  payment_method: string;
+  description: string;
+  expense_date: string;
 }
 
 const screenWidth = Dimensions.get('window').width;
@@ -79,7 +113,7 @@ export default function AnalyticsScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  
+
   const [analytics, setAnalytics] = useState<Analytics>({
     monthlyRevenue: 0,
     totalRevenue: 0,
@@ -103,6 +137,12 @@ export default function AnalyticsScreen() {
     completionRate: 0,
     revenueGrowth: 0,
     memberChurnRate: 0,
+    totalIncome: 0,        // ✅ Make sure these are here
+    monthlyIncome: 0,      // ✅
+    totalExpense: 0,       // ✅
+    monthlyExpense: 0,     // ✅
+    netProfit: 0,          // ✅
+    monthlyNetProfit: 0,   // ✅
   });
 
   const [chartData, setChartData] = useState({
@@ -122,11 +162,31 @@ export default function AnalyticsScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'income' | 'expense'>('income');
+  const [showAllIncome, setShowAllIncome] = useState(false);
+  const [showAllExpense, setShowAllExpense] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalType, setModalType] = useState<'income' | 'expense'>('income');
+  const [incomeList, setIncomeList] = useState<IncomeItem[]>([]);
+  const [expenseList, setExpenseList] = useState<ExpenseItem[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [showTypeDropdown, setShowTypeDropdown] = useState(false);
+
+  const [formData, setFormData] = useState({
+    name: '',
+    type: '',
+    amount: '',
+    payment_method: '',
+    description: '',
+  });
+
+  const incomeTypes = ['product', 'service', 'other'];
+  const expenseTypes = ['rent', 'maintenance', 'salary', 'equipment', 'other'];
 
   useEffect(() => {
     if (profile) {
       fetchAnalytics();
-      
+
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 800,
@@ -138,7 +198,7 @@ export default function AnalyticsScreen() {
   // Auto-scroll carousel
   useEffect(() => {
     if (isLoading || refreshing) return;
-    
+
     const interval = setInterval(() => {
       if (carouselRef.current) {
         const nextIndex = (currentIndex + 1) % 3;
@@ -222,26 +282,72 @@ export default function AnalyticsScreen() {
 
       const { data: userSubscriptions } = await subscriptionsQuery;
 
-     // Calculate revenue metrics (using only user_subscriptions)
-const monthlyRevenue = calculateMonthlyRevenueAmount(
-  userSubscriptions || [],
-  selectedMonth,
-  selectedYear
-);
+      // Fetch income
+      let incomeQuery = supabase.from('income').select('*').order('income_date', { ascending: false });
+      if (isGymOwner && gymId) {
+        incomeQuery = incomeQuery.eq('gym_id', gymId);
+      }
+      const { data: incomeData } = await incomeQuery;
 
-const prevMonth = selectedMonth === 0 ? 11 : selectedMonth - 1;
-const prevYear = selectedMonth === 0 ? selectedYear - 1 : selectedYear;
-const prevMonthRevenue = calculateMonthlyRevenueAmount(
-  userSubscriptions || [],
-  prevMonth,
-  prevYear
-);
+      // Fetch expenses
+      let expenseQuery = supabase.from('expenses').select('*').order('expense_date', { ascending: false });
+      if (isGymOwner && gymId) {
+        expenseQuery = expenseQuery.eq('gym_id', gymId);
+      }
+      const { data: expenseData } = await expenseQuery;
+
+      setIncomeList(incomeData || []);
+      setExpenseList(expenseData || []);
+
+      // Calculate income metrics
+      const totalIncome = (incomeData || []).reduce((sum, item) => sum + ensureValidNumber(item.amount, 0), 0);
+      const monthlyIncome = (incomeData || [])
+        .filter((item) => {
+          const date = new Date(item.income_date);
+          return date.getMonth() === selectedMonth && date.getFullYear() === selectedYear;
+        })
+        .reduce((sum, item) => sum + ensureValidNumber(item.amount, 0), 0);
+
+      // Calculate expense metrics
+      const totalExpense = (expenseData || []).reduce((sum, item) => sum + ensureValidNumber(item.amount, 0), 0);
+      const monthlyExpense = (expenseData || [])
+        .filter((item) => {
+          const date = new Date(item.expense_date);
+          return date.getMonth() === selectedMonth && date.getFullYear() === selectedYear;
+        })
+        .reduce((sum, item) => sum + ensureValidNumber(item.amount, 0), 0);
+
+      // Net profit
+      // Calculate revenue metrics FIRST (using only user_subscriptions)
+
+
+      // Calculate revenue metrics FIRST (using only user_subscriptions)
+      const monthlyRevenue = calculateMonthlyRevenueAmount(
+        userSubscriptions || [],
+        selectedMonth,
+        selectedYear
+      );
+
+      const prevMonth = selectedMonth === 0 ? 11 : selectedMonth - 1;
+      const prevYear = selectedMonth === 0 ? selectedYear - 1 : selectedYear;
+      const prevMonthRevenue = calculateMonthlyRevenueAmount(
+        userSubscriptions || [],
+        prevMonth,
+        prevYear
+      );
 
       const revenueGrowth = prevMonthRevenue > 0
         ? ((monthlyRevenue - prevMonthRevenue) / prevMonthRevenue) * 100
         : monthlyRevenue > 0 ? 100 : 0;
 
-        const totalRevenue = calculateTotalRevenueAmount(userSubscriptions || []);
+      const totalRevenue = calculateTotalRevenueAmount(userSubscriptions || []);
+
+      // Net profit (NOW we can calculate this)
+      const netProfit = totalRevenue + totalIncome - totalExpense;
+      const monthlyNetProfit = monthlyRevenue + monthlyIncome - monthlyExpense;
+
+      // Member metrics
+
 
       // Member metrics
       const totalMembers = members?.length || 0;
@@ -320,9 +426,9 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
 
       const avgSessionDuration = workoutLogs && workoutLogs.length > 0
         ? workoutLogs.reduce(
-            (sum, log) => sum + ensureValidNumber(log?.duration_minutes, 0),
-            0
-          ) / workoutLogs.length
+          (sum, log) => sum + ensureValidNumber(log?.duration_minutes, 0),
+          0
+        ) / workoutLogs.length
         : 0;
 
       // Attendance metrics
@@ -379,6 +485,12 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
         completionRate: ensureValidNumber(completionRate, 0),
         revenueGrowth: ensureValidNumber(revenueGrowth, 0),
         memberChurnRate: ensureValidNumber(memberChurnRate, 0),
+        totalIncome: ensureValidNumber(totalIncome, 0),
+        monthlyIncome: ensureValidNumber(monthlyIncome, 0),
+        totalExpense: ensureValidNumber(totalExpense, 0),
+        monthlyExpense: ensureValidNumber(monthlyExpense, 0),
+        netProfit: ensureValidNumber(netProfit, 0),
+        monthlyNetProfit: ensureValidNumber(monthlyNetProfit, 0),
       });
 
       setChartData({
@@ -404,7 +516,7 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
         // Check payment_date first, fall back to start_date or created_at
         const dateToCheck = sub.payment_date || sub.start_date || sub.created_at;
         if (!dateToCheck) return false;
-        
+
         const paymentDate = new Date(dateToCheck);
         return paymentDate.getMonth() === month && paymentDate.getFullYear() === year;
       })
@@ -574,23 +686,23 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
         {
           label: 'Total Revenue',
           value: `₹${(analytics.totalRevenue / 1000).toFixed(1)}k`,
-          icon: <Target size={18} color={theme.colors.accent} />,
+          icon: <CheckCircle2 size={18} color={theme.colors.accent} />,
           change: 'All time',
           changeType: 'positive' as const,
         },
         {
-          label: 'Avg per Member',
-          value: `₹${(analytics.avgRevenuePerMember / 1000).toFixed(1)}k`,
-          icon: <Users size={18} color={theme.colors.warning} />,
-          change: 'Per member',
-          changeType: 'positive' as const,
+          label: 'Monthly Expense',
+          value: `₹${(analytics.monthlyExpense / 1000).toFixed(1)}k`,
+          icon: <ArrowDownCircle size={18} color={theme.colors.error} />,
+          change: 'This month',
+          changeType: 'negative' as const,
         },
         {
-          label: 'Pending',
-          value: analytics.pendingPayments + analytics.partialPayments,
-          icon: <AlertCircle size={18} color={theme.colors.error} />,
-          change: 'Need action',
-          changeType: 'neutral' as const,
+          label: 'Monthly Income ',
+          value: `₹${(analytics.monthlyNetProfit / 1000).toFixed(1)}k`,
+          icon: <TrendingUp size={18} color={theme.colors.success} />,
+          change: 'This month',
+          changeType: analytics.monthlyNetProfit >= 0 ? 'positive' as const : 'negative' as const,
         },
       ],
     },
@@ -716,6 +828,55 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
     </Animated.View>
   );
 
+  const openModal = (type: 'income' | 'expense') => {
+    setModalType(type);
+    setFormData({
+      name: '',
+      type: '',
+      amount: '',
+      payment_method: '',
+      description: '',
+    });
+    setModalVisible(true);
+  };
+
+  const handleSubmit = async () => {
+    if (!formData.name || !formData.type || !formData.amount) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const tableName = modalType === 'income' ? 'income' : 'expenses';
+      const dateField = modalType === 'income' ? 'income_date' : 'expense_date';
+
+      const { error } = await supabase.from(tableName).insert({
+        gym_id: profile?.gym_id,
+        name: formData.name,
+        type: formData.type,
+        amount: parseFloat(formData.amount),
+        payment_method: formData.payment_method,
+        description: formData.description,
+        [dateField]: new Date().toISOString(),
+        created_by: profile?.id,
+      });
+
+      if (error) throw error;
+
+      setModalVisible(false);
+      await fetchAnalytics();
+    } catch (error) {
+      console.error('Error adding entry:', error);
+      alert('Failed to add entry. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const displayedIncome = showAllIncome ? incomeList : incomeList.slice(0, 5);
+  const displayedExpense = showAllExpense ? expenseList : expenseList.slice(0, 5);
+
   const styles = StyleSheet.create({
     container: {
       flex: 1,
@@ -775,6 +936,22 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
       shadowRadius: 8,
       elevation: 3,
     },
+    viewMoreButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 24,
+      borderRadius: 12,
+      backgroundColor: theme.colors.primary + '12',
+      marginTop: 16,
+      gap: 8,
+    },
+    viewMoreText: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: theme.colors.primary,
+    },
     monthButton: {
       padding: 10,
       borderRadius: 12,
@@ -800,6 +977,7 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
       shadowRadius: 16,
       elevation: 8,
       overflow: 'hidden',
+      marginBottom:18,
     },
     carouselCardHeader: {
       padding: 24,
@@ -878,6 +1056,210 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
       fontWeight: '800',
       color: theme.colors.text,
       letterSpacing: -0.5,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    headerLeft: {
+      flex: 1,
+    },
+    addButton: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: theme.colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: theme.colors.primary,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 6,
+    },
+    tabContainer: {
+      flexDirection: 'row',
+      gap: 12,
+      paddingHorizontal: 24,
+      marginBottom: 20,
+    },
+    tab: {
+      flex: 1,
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      borderRadius: 14,
+      backgroundColor: theme.colors.card,
+      alignItems: 'center',
+      borderWidth: 2,
+      borderColor: 'transparent',
+    },
+    activeTab: {
+      backgroundColor: theme.colors.primary + '15',
+      borderColor: theme.colors.primary,
+    },
+    tabText: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: theme.colors.textSecondary,
+    },
+    activeTabText: {
+      color: theme.colors.primary,
+    },
+    listCard: {
+      marginHorizontal: 24,
+      marginBottom: 24,
+      padding: 20,
+      borderRadius: 20,
+      backgroundColor: theme.colors.card,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 12,
+      elevation: 6,
+    },
+    listItem: {
+      paddingVertical: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    listItemTop: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: 8,
+    },
+    listItemLeft: {
+      flex: 1,
+      gap: 4,
+    },
+    itemName: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    itemType: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      fontWeight: '600',
+      textTransform: 'capitalize',
+    },
+    itemAmount: {
+      fontSize: 20,
+      fontWeight: '800',
+      color: theme.colors.text,
+    },
+    itemDescription: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+    },
+    itemDate: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+    },
+    emptyState: {
+      alignItems: 'center',
+      paddingVertical: 40,
+    },
+    emptyText: {
+      fontSize: 15,
+      color: theme.colors.textSecondary,
+      marginTop: 12,
+      fontWeight: '600',
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'flex-end',
+    },
+    modalContent: {
+      backgroundColor: theme.colors.card,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      padding: 24,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 24,
+    },
+    modalTitle: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: theme.colors.text,
+    },
+    closeButton: {
+      padding: 8,
+    },
+    input: {
+      backgroundColor: theme.colors.background,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 16,
+      color: theme.colors.text,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 8,
+    },
+    dropdownButton: {
+      backgroundColor: theme.colors.background,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    dropdownButtonText: {
+      fontSize: 16,
+      color: theme.colors.text,
+    },
+    dropdownPlaceholder: {
+      color: theme.colors.textSecondary,
+    },
+    dropdown: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      maxHeight: 200,
+    },
+    dropdownItem: {
+      padding: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    dropdownItemText: {
+      fontSize: 16,
+      color: theme.colors.text,
+      textTransform: 'capitalize',
+    },
+    submitButton: {
+      backgroundColor: theme.colors.primary,
+      borderRadius: 14,
+      padding: 18,
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    submitButtonDisabled: {
+      opacity: 0.5,
+    },
+    submitButtonText: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: '#FFFFFF',
     },
     changeIndicator: {
       paddingHorizontal: 10,
@@ -1040,10 +1422,21 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>Analytics</Text>
-          <Text style={styles.subtitle}>
-            {gym?.name ? `${gym.name} insights and metrics` : 'Performance insights and metrics'}
-          </Text>
+          <View style={styles.headerRow}>
+            <View style={styles.headerLeft}>
+              <Text style={styles.title}>Analytics</Text>
+              <Text style={styles.subtitle}>
+                {gym?.name ? `${gym.name} insights and metrics` : 'Performance insights and metrics'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => openModal('income')}
+              activeOpacity={0.7}
+            >
+              <Plus size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Month Selector */}
@@ -1103,7 +1496,7 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
               setCurrentIndex(index);
             }}
           />
-          
+
           <View style={styles.paginationContainer}>
             {carouselData.map((_, index) => (
               <Animated.View
@@ -1155,29 +1548,142 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
           />
         </Card>
 
-        {/* Check-ins Chart */}
+        {/* Income & Expense Tabs */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>📊 Check-in Activity</Text>
-          <Text style={styles.sectionSubtitle}>Monthly attendance • Last 6 months</Text>
+          <Text style={styles.sectionTitle}>💸 Income & Expenses</Text>
+          <Text style={styles.sectionSubtitle}>Financial transactions</Text>
         </View>
-        <Card style={styles.chartCard}>
-          <LineChart
-            data={chartData.checkIns}
-            width={screenWidth - 96}
-            height={220}
-            chartConfig={{
-              ...chartConfig,
-              color: (opacity = 1) =>
-                `rgba(${successRgb.r}, ${successRgb.g}, ${successRgb.b}, ${opacity})`,
-            }}
-            style={styles.chart}
-            bezier
-            fromZero
-            withDots
-            withShadow
-            withInnerLines
-            withOuterLines
-          />
+
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'income' && styles.activeTab]}
+            onPress={() => setActiveTab('income')}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.tabText, activeTab === 'income' && styles.activeTabText]}>
+              Income
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'expense' && styles.activeTab]}
+            onPress={() => setActiveTab('expense')}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.tabText, activeTab === 'expense' && styles.activeTabText]}>
+              Expenses
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Income/Expense List */}
+        <Card style={styles.listCard}>
+          {activeTab === 'income' ? (
+            incomeList.length > 0 ? (
+              <>
+                {displayedIncome.map((item, index) => (
+                  <View key={item.id} style={[styles.listItem, index === displayedIncome.length - 1 && { borderBottomWidth: 0 }]}>
+                    <View style={styles.listItemTop}>
+                      <View style={styles.listItemLeft}>
+                        <Text style={styles.itemName}>{item.name}</Text>
+                        <Text style={styles.itemType}>{item.type}</Text>
+                        {item.description && (
+                          <Text style={styles.itemDescription} numberOfLines={2}>
+                            {item.description}
+                          </Text>
+                        )}
+                        <Text style={styles.itemDate}>
+                          {new Date(item.income_date).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </Text>
+                      </View>
+                      <Text style={[styles.itemAmount, { color: theme.colors.success }]}>
+                        ₹{item.amount.toLocaleString()}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+                {incomeList.length > 5 && (
+                  <TouchableOpacity
+                    style={styles.viewMoreButton}
+                    onPress={() => setShowAllIncome(!showAllIncome)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.viewMoreText}>
+                      {showAllIncome ? 'Show Less' : `View All ${incomeList.length} Items`}
+                    </Text>
+                    <ChevronDown
+                      size={20}
+                      color={theme.colors.primary}
+                      style={{
+                        transform: [{ rotate: showAllIncome ? '180deg' : '0deg' }]
+                      }}
+                    />
+                  </TouchableOpacity>
+                )}
+              </>
+            ) : (
+              <View style={styles.emptyState}>
+                <ArrowUpCircle size={48} color={theme.colors.textSecondary} />
+                <Text style={styles.emptyText}>No income recorded yet</Text>
+              </View>
+            )
+          ) : (
+            expenseList.length > 0 ? (
+              <>
+                {displayedExpense.map((item, index) => (
+                  <View key={item.id} style={[styles.listItem, index === displayedExpense.length - 1 && { borderBottomWidth: 0 }]}>
+                    <View style={styles.listItemTop}>
+                      <View style={styles.listItemLeft}>
+                        <Text style={styles.itemName}>{item.name}</Text>
+                        <Text style={styles.itemType}>{item.type}</Text>
+                        {item.description && (
+                          <Text style={styles.itemDescription} numberOfLines={2}>
+                            {item.description}
+                          </Text>
+                        )}
+                        <Text style={styles.itemDate}>
+                          {new Date(item.expense_date).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </Text>
+                      </View>
+                      <Text style={[styles.itemAmount, { color: theme.colors.error }]}>
+                        ₹{item.amount.toLocaleString()}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+                {expenseList.length > 5 && (
+                  <TouchableOpacity
+                    style={styles.viewMoreButton}
+                    onPress={() => setShowAllExpense(!showAllExpense)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.viewMoreText}>
+                      {showAllExpense ? 'Show Less' : `View All ${expenseList.length} Items`}
+                    </Text>
+                    <ChevronDown
+                      size={20}
+                      color={theme.colors.primary}
+                      style={{
+                        transform: [{ rotate: showAllExpense ? '180deg' : '0deg' }]
+                      }}
+                    />
+                  </TouchableOpacity>
+                )}
+              </>
+            ) : (
+              <View style={styles.emptyState}>
+                <ArrowDownCircle size={48} color={theme.colors.textSecondary} />
+                <Text style={styles.emptyText}>No expenses recorded yet</Text>
+              </View>
+            )
+          )}
         </Card>
 
         {/* Quick Insights */}
@@ -1225,6 +1731,157 @@ const prevMonthRevenue = calculateMonthlyRevenueAmount(
           </View>
         </View>
       </Animated.ScrollView>
+
+      {/* Add Income/Expense Modal */}
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setModalVisible(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  Add {modalType === 'income' ? 'Income' : 'Expense'}
+                </Text>
+                <TouchableOpacity
+                  style={styles.closeButton}
+                  onPress={() => setModalVisible(false)}
+                >
+                  <X size={24} color={theme.colors.text} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.tabContainer}>
+                <TouchableOpacity
+                  style={[styles.tab, modalType === 'income' && styles.activeTab]}
+                  onPress={() => {
+                    setModalType('income');
+                    setFormData({ ...formData, type: '' });
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.tabText, modalType === 'income' && styles.activeTabText]}>
+                    Income
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.tab, modalType === 'expense' && styles.activeTab]}
+                  onPress={() => {
+                    setModalType('expense');
+                    setFormData({ ...formData, type: '' });
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.tabText, modalType === 'expense' && styles.activeTabText]}>
+                    Expense
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.label}>Name *</Text>
+              <TextInput
+                style={styles.input}
+                value={formData.name}
+                onChangeText={(text) => setFormData({ ...formData, name: text })}
+                placeholder="Enter name"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+
+              <Text style={styles.label}>Type *</Text>
+              <TouchableOpacity
+                style={styles.dropdownButton}
+                onPress={() => setShowTypeDropdown(!showTypeDropdown)}
+              >
+                <Text
+                  style={[
+                    styles.dropdownButtonText,
+                    !formData.type && styles.dropdownPlaceholder,
+                  ]}
+                >
+                  {formData.type || 'Select type'}
+                </Text>
+                <ChevronDown size={20} color={theme.colors.textSecondary} />
+              </TouchableOpacity>
+
+              {showTypeDropdown && (
+                <ScrollView style={styles.dropdown} nestedScrollEnabled>
+                  {(modalType === 'income' ? incomeTypes : expenseTypes).map((type) => (
+                    <TouchableOpacity
+                      key={type}
+                      style={styles.dropdownItem}
+                      onPress={() => {
+                        setFormData({ ...formData, type });
+                        setShowTypeDropdown(false);
+                      }}
+                    >
+                      <Text style={styles.dropdownItemText}>{type}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+
+              <Text style={styles.label}>Amount *</Text>
+              <TextInput
+                style={styles.input}
+                value={formData.amount}
+                onChangeText={(text) => setFormData({ ...formData, amount: text })}
+                placeholder="Enter amount"
+                placeholderTextColor={theme.colors.textSecondary}
+                keyboardType="numeric"
+              />
+
+              <Text style={styles.label}>Payment Method</Text>
+              <TextInput
+                style={styles.input}
+                value={formData.payment_method}
+                onChangeText={(text) => setFormData({ ...formData, payment_method: text })}
+                placeholder="e.g., Cash, Card, UPI"
+                placeholderTextColor={theme.colors.textSecondary}
+              />
+
+              <Text style={styles.label}>Description</Text>
+              <TextInput
+                style={[styles.input, { height: 100, textAlignVertical: 'top' }]}
+                value={formData.description}
+                onChangeText={(text) => setFormData({ ...formData, description: text })}
+                placeholder="Enter description"
+                placeholderTextColor={theme.colors.textSecondary}
+                multiline
+                numberOfLines={4}
+              />
+
+              <TouchableOpacity
+                style={[
+                  styles.submitButton,
+                  (!formData.name || !formData.type || !formData.amount || submitting) &&
+                  styles.submitButtonDisabled,
+                ]}
+                onPress={handleSubmit}
+                disabled={!formData.name || !formData.type || !formData.amount || submitting}
+                activeOpacity={0.7}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.submitButtonText}>
+                    Add {modalType === 'income' ? 'Income' : 'Expense'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaWrapper>
   );
 }

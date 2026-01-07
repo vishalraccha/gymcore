@@ -11,6 +11,7 @@ import {
   RefreshControl,
   Platform,
   Image,
+  Linking,
 } from "react-native";
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from "@/lib/supabase";
@@ -81,6 +82,8 @@ export default function GymProfileScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+
+  // const APK_QR_URL = "https://beengg.space/gym-core";
 
   useEffect(() => {
     loadGymData();
@@ -771,7 +774,7 @@ export default function GymProfileScreen() {
       marginBottom: 12,
     },
     statValue: {
-      fontSize: 20,
+      fontSize: 15,
       fontWeight: '700',
       color: theme.colors.text,
       marginBottom: 6,
@@ -795,6 +798,59 @@ export default function GymProfileScreen() {
       marginHorizontal: 24,
       marginBottom: 16,
       padding: 20,
+    },
+    // APK QR Card
+    qrCard: {
+      marginHorizontal: 24,
+      marginBottom: 16,
+      padding: 20,
+      alignItems: 'center',
+    },
+    qrTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 8,
+      fontFamily: 'Inter-Bold',
+      textAlign: 'center',
+    },
+    qrSubtitle: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginBottom: 16,
+      textAlign: 'center',
+      lineHeight: 20,
+      fontFamily: 'Inter-Regular',
+    },
+    qrImageWrapper: {
+      padding: 12,
+      borderRadius: 16,
+      backgroundColor: theme.colors.card,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      marginBottom: 16,
+    },
+    qrImage: {
+      width: 200,
+      height: 200,
+      borderRadius: 12,
+    },
+    qrButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderRadius: 999,
+      backgroundColor: theme.colors.primary,
+      gap: 8,
+      marginTop: 4,
+    },
+    qrButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#FFFFFF',
+      fontFamily: 'Inter-SemiBold',
     },
     themeHeader: {
       flexDirection: 'row',
@@ -1441,6 +1497,38 @@ export default function GymProfileScreen() {
             </View>
           </Card>
         )}
+
+        {/* APK QR CODE */}
+        {/* <Card style={styles.qrCard}>
+          <Text style={styles.qrTitle}>APK QR Code</Text>
+          <Text style={styles.qrSubtitle}>
+            Scan this QR code to download or open GymCore from the web.
+          </Text>
+
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => Linking.openURL(APK_QR_URL)}
+            style={styles.qrImageWrapper}
+          >
+            <Image
+              source={{
+                uri: `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
+                  APK_QR_URL
+                )}`,
+              }}
+              style={styles.qrImage}
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.qrButton}
+            activeOpacity={0.8}
+            onPress={() => Linking.openURL(APK_QR_URL)}
+          >
+            <Text style={styles.qrButtonText}>Open GymCore Website</Text>
+            <ArrowRight size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        </Card> */}
 
         {/* Theme Picker */}
         <Card style={styles.themeCard}>

@@ -292,23 +292,20 @@ const [submittingFeedback, setSubmittingFeedback] = useState(false);
   - Consult doctor before workouts
   - GymCore not liable for injuries
   
-  Contact: support@gymcore.com`
+  Contact: beengg.space@gmail.com`
       },
       support: {
         title: 'Help & Support',
         content: `GymCore Support Center
   
   📧 Email Support
-  support@gymcore.com
+  beengg.space@gmail.com
   Response time: 24-48 hours
   
   📱 Phone Support
-  +91 1800-GYMCORE
-  Mon-Fri: 9 AM - 6 PM IST
+  +91 9021361644
+  Mon-Fri: 12/7
   
-  💬 Live Chat
-  Available in app
-  Mon-Fri: 10 AM - 5 PM IST
   
   🌐 Help Center
   Visit: help.gymcore.com

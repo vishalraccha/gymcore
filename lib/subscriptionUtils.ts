@@ -2,7 +2,7 @@
  * Utility functions for subscription and trial management
  */
 
-const TRIAL_DAYS = 1;
+const TRIAL_DAYS = 14;
 
 /**
  * Check if user is in trial period

@@ -4,7 +4,7 @@
     "slug": "gymcore",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/splash-icon.png",
     "scheme": "gymcore",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -16,40 +16,18 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.gymcore.app",
-      "splash": {
-        "image": "./assets/images/splash-icon.png",
-        "resizeMode": "contain",
-        "backgroundColor": "#1a1a2e",
-        "dark": {
-          "image": "./assets/images/splash-icon.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#000000"
-        }
-      }
+      "bundleIdentifier": "com.gymcore.app"
     },
     "android": {
       "jsEngine": "hermes",
       "package": "com.gymcore.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/icon.png",
+        "foregroundImage": "./assets/images/splash-icon.png",
         "backgroundColor": "#1a1a2e"
-      },
-      "splash": {
-        "image": "./assets/images/splash-icon.png",
-        "resizeMode": "contain",
-        "backgroundColor": "#1a1a2e",
-        "mdpi": "./assets/images/splash-icon.png",
-        "hdpi": "./assets/images/splash-icon.png",
-        "xhdpi": "./assets/images/splash-icon.png",
-        "xxhdpi": "./assets/images/splash-icon.png",
-        "xxxhdpi": "./assets/images/splash-icon.png"
       },
       "permissions": [
         "INTERNET",
-        "ACCESS_NETWORK_STATE",
-        "WRITE_EXTERNAL_STORAGE",
-        "READ_EXTERNAL_STORAGE"
+        "ACCESS_NETWORK_STATE"
       ],
       "intentFilters": [
         {
@@ -75,13 +53,6 @@
     "plugins": [
       "expo-router",
       [
-        "expo-splash-screen",
-        {
-          "backgroundColor": "#1a1a2e",
-          "imageWidth": 200
-        }
-      ],
-      [
         "expo-build-properties",
         {
           "android": {
@@ -95,14 +66,16 @@
           }
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-mail-composer"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "99413c8f-d9d8-4dfc-b44f-43cd49e6161a"
+        "projectId": "d2fb50e0-8d02-46bc-bbf1-2b6448297c2a"
       }
     }
   }

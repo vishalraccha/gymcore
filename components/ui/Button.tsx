@@ -31,9 +31,9 @@ export function Button({
         return { backgroundColor: theme.colors.primary };
       case 'secondary':
         return { backgroundColor: theme.colors.success };
-      case 'outline':
+      case 'outline': 
         return { 
-          backgroundColor: 'transparent',
+          backgroundColor: theme.colors.card,
           borderWidth: 1,
           borderColor: theme.colors.primary,
         };

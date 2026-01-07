@@ -11,6 +11,7 @@ import {
   RefreshControl,
   Platform,
   Animated,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +21,11 @@ import { supabase } from '@/lib/supabase';
 import { Profile, WorkoutLog, DietLog } from '@/types/database';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import InvoicesList from "@/components/InvoicesList";
+import { getUserInvoices } from "@/lib/invoice";
+import * as ImagePicker from 'expo-image-picker';
+import { Image } from 'react-native';
+import { uploadMemberPhoto, createBlobFromUri } from '@/lib/storage';
 import {
   Plus,
   Search,
@@ -64,6 +70,8 @@ const showConfirm = (
   }
 };
 
+
+
 const showAlert = (title: string, message: string) => {
   if (Platform.OS === 'web') {
     window.alert(`${title}\n\n${message}`);
@@ -86,6 +94,8 @@ interface MemberDetails extends Profile {
   totalCheckIns?: number;
   expectedCheckIns?: number;
   subscriptionStatus?: 'active' | 'expired' | 'none';
+  batch?: string;
+  profile_photo_url?: string;
 }
 
 export default function MembersScreen() {
@@ -99,6 +109,8 @@ export default function MembersScreen() {
   const [selectedMember, setSelectedMember] = useState<MemberDetails | null>(null);
   const [customStartDate, setCustomStartDate] = useState(new Date().toISOString().split('T')[0]); // Set to current date
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const [invoices, setInvoices] = useState<any[]>([]);
   const [newMember, setNewMember] = useState({
     full_name: '',
     email: '',
@@ -107,7 +119,11 @@ export default function MembersScreen() {
     has_personal_training: false,
     weight: '',
     height: '',
+    batch: 'morning',
+    profile_photo_uri: '',
   });
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [updatingPhoto, setUpdatingPhoto] = useState(false);
   const [availableSubscriptions, setAvailableSubscriptions] = useState<any[]>([]);
   const [selectedSubscription, setSelectedSubscription] = useState<any>(null);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online' | 'none'>('none');
@@ -132,6 +148,196 @@ export default function MembersScreen() {
   const [memberAttendance, setMemberAttendance] = useState<any[]>([]);
   const [showPassword, setShowPassword] = useState(false);
   // const [isCreatingMember, setIsCreatingMember] = useState(false);
+
+  useEffect(() => {
+    if (profile?.id) {
+      loadInvoices();
+    }
+  }, [profile?.id]);
+
+// ⭐ FIXED: Pick image and store it properly for mobile
+const pickImage = async () => {
+  try {
+    const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
+    const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (cameraStatus !== 'granted' && libraryStatus !== 'granted') {
+      Alert.alert('Permission Required', 'Please allow camera and photo library access');
+      return;
+    }
+
+    Alert.alert(
+      'Upload Photo',
+      'Choose an option',
+      [
+        {
+          text: 'Take Photo',
+          onPress: async () => {
+            if (cameraStatus !== 'granted') {
+              Alert.alert('Permission Denied', 'Camera access required');
+              return;
+            }
+
+            const result = await ImagePicker.launchCameraAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.7, // ⭐ Reduced for faster upload
+              base64: false, // ⭐ Don't need base64
+            });
+
+            if (!result.canceled && result.assets[0]) {
+              setNewMember({ ...newMember, profile_photo_uri: result.assets[0].uri });
+            }
+          },
+        },
+        {
+          text: 'Choose from Gallery',
+          onPress: async () => {
+            if (libraryStatus !== 'granted') {
+              Alert.alert('Permission Denied', 'Photo library access required');
+              return;
+            }
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.7, // ⭐ Reduced for faster upload
+              base64: false,
+            });
+
+            if (!result.canceled && result.assets[0]) {
+              setNewMember({ ...newMember, profile_photo_uri: result.assets[0].uri });
+            }
+          },
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ]
+    );
+  } catch (error) {
+    console.error('Image picker error:', error);
+    Alert.alert('Error', 'Failed to open image picker');
+  }
+};
+
+// ⭐ SIMPLIFIED: Just pass URI directly to storage function
+// ⭐ WORKING: Create blob properly for mobile
+const uploadProfilePhoto = async (userId: string, photoUri: string): Promise<string> => {
+  try {
+    console.log('📸 Starting member photo upload for:', userId);
+    console.log('📸 Photo URI:', photoUri);
+
+    if (!photoUri || photoUri.trim() === '') {
+      throw new Error('Invalid photo URI');
+    }
+
+    // ⭐ Create blob using XMLHttpRequest (works on mobile + web)
+    const blob: Blob = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.onload = function () {
+        resolve(xhr.response as Blob);
+      };
+      xhr.onerror = function (e) {
+        console.error('XHR error:', e);
+        reject(new TypeError('Network request failed'));
+      };
+      xhr.responseType = 'blob';
+      xhr.open('GET', photoUri, true);
+      xhr.send(null);
+    });
+
+    console.log('✅ Blob created:', (blob.size / 1024).toFixed(2), 'KB');
+
+    // Upload
+    const photoUrl = await uploadMemberPhoto(blob, userId);
+    console.log('✅ Photo uploaded:', photoUrl);
+
+    // Update database
+    const { error } = await supabase
+      .from('profiles')
+      .update({ profile_photo_url: photoUrl })
+      .eq('id', userId);
+
+    if (error) {
+      console.error('❌ Database update error:', error);
+      throw error;
+    }
+
+    console.log('✅ Database updated successfully');
+    return photoUrl;
+
+  } catch (error: any) {
+    console.error('❌ Upload failed:', error);
+    const errorMessage = error?.message || 'Failed to upload photo';
+    
+    if (Platform.OS === 'web') {
+      window.alert(`Upload failed: ${errorMessage}`);
+    } else {
+      Alert.alert('Upload Failed', errorMessage);
+    }
+    
+    throw error;
+  }
+};
+
+// ⭐ For updating existing member photos
+const updateMemberPhoto = async (memberId: string) => {
+  try {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please grant permission to access photos');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+
+    if (result.canceled || !result.assets?.[0]) {
+      return;
+    }
+
+    setUpdatingPhoto(true);
+
+    const photoUrl = await uploadProfilePhoto(memberId, result.assets[0].uri);
+
+    if (selectedMember) {
+      setSelectedMember({
+        ...selectedMember,
+        profile_photo_url: photoUrl,
+      });
+    }
+
+    await fetchMembers();
+
+    Alert.alert('Success', 'Profile photo updated successfully!');
+
+  } catch (error: any) {
+    console.error('Error updating photo:', error);
+    Alert.alert('Error', error?.message || 'Failed to update photo. Please try again.');
+  } finally {
+    setUpdatingPhoto(false);
+  }
+};
+  const loadInvoices = async () => {
+    try {
+      setLoadingInvoices(true);
+      const data = await getUserInvoices(profile!.id);
+      setInvoices(data);
+    } catch (error) {
+      console.error('Error loading invoices:', error);
+    } finally {
+      setLoadingInvoices(false);
+    }
+  };
   const ensurePaymentFields = (subscription: any) => {
     if (!subscription) return subscription;
 
@@ -473,42 +679,55 @@ export default function MembersScreen() {
     return Math.max(0, total - received);
   };
 
-  // ============================================
-  // FINAL CORRECTED addMember FUNCTION
-  // Copy this entire function into your MembersScreen
-  // ============================================
 
   const addMember = async () => {
     if (!newMember.full_name || !newMember.email || !newMember.password || !newMember.phone) {
-      window.alert('Please fill in all required fields')
-      Alert.alert('Error', 'Please fill in all required fields');
+      if (Platform.OS === 'web') {
+        window.alert('Please fill in all required fields');
+      } else {
+        Alert.alert('Error', 'Please fill in all required fields');
+      }
       return;
     }
 
     if (newMember.password.length < 6) {
-      window.alert('Password must be at least 6 characters')
-      Alert.alert('Error', 'Password must be at least 6 characters');
+      if (Platform.OS === 'web') {
+        window.alert('Password must be at least 6 characters');
+      } else {
+        Alert.alert('Error', 'Password must be at least 6 characters');
+      }
       return;
     }
 
     if ((paymentMethod === 'cash' || paymentMethod === 'online') && selectedSubscription) {
       if (!amountReceived || parseFloat(amountReceived) <= 0) {
-        window.alert('Please enter amount received')
-        Alert.alert('Error', 'Please enter amount received');
+        if (Platform.OS === 'web') {
+          window.alert('Please enter amount received');
+        } else {
+          Alert.alert('Error', 'Please enter amount received');
+        }
         return;
       }
       if (parseFloat(amountReceived) > selectedSubscription.price) {
-        window.alert('Amount received cannot exceed plan price')
-        Alert.alert('Error', 'Amount received cannot exceed plan price');
+        if (Platform.OS === 'web') {
+          window.alert('Amount received cannot exceed plan price');
+        } else {
+          Alert.alert('Error', 'Amount received cannot exceed plan price');
+        }
         return;
       }
     }
+
     setIsLoading(true);
     setIsCreatingMember(true);
 
     try {
-      // Create user account
+      // Step 1: Save current admin session
       const { data: { session: adminSession } } = await supabase.auth.getSession();
+
+      console.log('📝 Creating new member account...');
+
+      // Step 2: Create user account
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: newMember.email,
         password: newMember.password,
@@ -516,7 +735,7 @@ export default function MembersScreen() {
           emailRedirectTo: undefined,
           data: {
             full_name: newMember.full_name,
-            phone: newMember.phone || null,
+            phone: newMember.phone,
             role: 'member',
             gym_id: profile?.gym_id ? String(profile.gym_id) : null,
             has_personal_training: newMember.has_personal_training,
@@ -528,34 +747,83 @@ export default function MembersScreen() {
       if (!authData.user) throw new Error('Failed to create user');
 
       const userId = authData.user.id;
+      console.log('✅ User created:', userId);
 
-      // ⭐ FIX: Update profile with gym_id, weight, and height
-      await supabase
+      // Step 3: Wait a moment for profile to be created by trigger
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Step 4: Update profile with ALL required fields (BEFORE restoring session)
+      console.log('📝 Updating profile with phone, weight, height, batch...');
+
+      const profileUpdates: any = {
+        gym_id: profile?.gym_id,
+        phone: newMember.phone, // ⭐ CRITICAL: Set phone explicitly
+        weight: newMember.weight ? parseFloat(newMember.weight) : null,
+        height: newMember.height ? parseFloat(newMember.height) : null,
+        batch: newMember.batch,
+        has_personal_training: newMember.has_personal_training,
+      };
+
+      const { error: profileUpdateError } = await supabase
         .from('profiles')
-        .update({
-          gym_id: profile?.gym_id, // ⭐ ADD: Set gym_id directly
-          weight: newMember.weight ? parseFloat(newMember.weight) : null,
-          height: newMember.height ? parseFloat(newMember.height) : null,
-        })
+        .update(profileUpdates)
         .eq('id', userId);
 
+      if (profileUpdateError) {
+        console.error('Profile update error:', profileUpdateError);
+        throw new Error(`Failed to update profile: ${profileUpdateError.message}`);
+      }
+
+      console.log('✅ Profile updated with phone and other fields');
+
+      // Step 5: Upload profile photo if provided (BEFORE restoring session)
+      let uploadedPhotoUrl: string | null = null;
+      // Step 5: Upload profile photo if provided (AFTER profile is created)
+if (newMember.profile_photo_uri) {
+  try {
+    console.log('📸 Uploading profile photo...');
+    await uploadProfilePhoto(userId, newMember.profile_photo_uri);
+    console.log('✅ Photo uploaded successfully');
+  } catch (photoError: any) {
+    console.error('❌ Photo upload failed:', photoError);
+    // Don't fail member creation
+    if (Platform.OS === 'web') {
+      console.warn('Photo upload failed, continuing...');
+    } else {
+      Alert.alert(
+        'Warning',
+        'Member created but photo upload failed. You can update it later.',
+        [{ text: 'OK' }]
+      );
+    }
+  }
+}
+
+      // Step 6: Restore admin session
+      console.log('🔄 Restoring admin session...');
       if (adminSession) {
         await supabase.auth.setSession({
           access_token: adminSession.access_token,
           refresh_token: adminSession.refresh_token,
         });
+        console.log('✅ Admin session restored');
       }
 
-      // Wait for signOut to complete
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Step 7: Verify phone and photo were saved
+      const { data: verifyProfile } = await supabase
+        .from('profiles')
+        .select('phone, profile_photo_url, weight, height, batch')
+        .eq('id', userId)
+        .single();
 
-      // Handle personal training
+      console.log('✅ Profile verification:', verifyProfile);
+
+      if (!verifyProfile?.phone) {
+        console.error('⚠️ WARNING: Phone was not saved!');
+      }
+
+      // Step 8: Handle personal training
       if (newMember.has_personal_training && profile?.gym_id) {
-        await supabase
-          .from('profiles')
-          .update({ has_personal_training: true })
-          .eq('id', userId);
-
         await supabase.from('personal_training_assignments').insert([{
           user_id: userId,
           gym_id: profile.gym_id,
@@ -565,15 +833,13 @@ export default function MembersScreen() {
         }]);
       }
 
-      // Handle subscription if selected
+      // Step 9: Handle subscription if selected
       if ((paymentMethod === 'cash' || paymentMethod === 'online') && selectedSubscription) {
         try {
           const received = parseFloat(amountReceived);
           const pending = Math.max(0, selectedSubscription.price - received);
           const paymentStatus = pending === 0 ? 'completed' : 'partial';
 
-          // Use selected date (default is today)
-          // Calculate dates without timezone issues
           const startDateParts = customStartDate.split('-');
           const startDate = new Date(
             parseInt(startDateParts[0]),
@@ -590,8 +856,8 @@ export default function MembersScreen() {
             .insert([{
               user_id: userId,
               subscription_id: selectedSubscription.id,
-              start_date: customStartDate, // Store as YYYY-MM-DD string
-              end_date: endDate.toISOString().split('T')[0], // Store as YYYY-MM-DD string
+              start_date: customStartDate,
+              end_date: endDate.toISOString().split('T')[0],
               custom_start_date: customStartDate,
               total_amount: selectedSubscription.price,
               paid_amount: received,
@@ -610,6 +876,7 @@ export default function MembersScreen() {
             .single();
 
           if (subError) throw subError;
+
           if (received > 0) {
             const receiptNum = receiptNumber || `REC-${Date.now()}`;
 
@@ -630,7 +897,7 @@ export default function MembersScreen() {
 
             if (paymentError) throw paymentError;
 
-            const { error: invoiceError } = await supabase.from('invoices').insert([{
+            await supabase.from('invoices').insert([{
               invoice_number: `INV-${Date.now()}`,
               user_id: userId,
               gym_id: profile?.gym_id,
@@ -638,7 +905,6 @@ export default function MembersScreen() {
               payment_type: paymentMethod,
               amount: selectedSubscription.price,
               currency: 'INR',
-              tax_amount: 0,
               total_amount: selectedSubscription.price,
               remaining_amount: pending,
               payment_status: paymentStatus,
@@ -651,60 +917,73 @@ export default function MembersScreen() {
                 amount: selectedSubscription.price,
               }]),
             }]);
-
-            if (invoiceError) {
-              console.error('Invoice creation error:', invoiceError);
-            }
           }
         } catch (subError) {
           console.error('Error creating subscription:', subError);
-          window.alert('Member created but subscription setup failed.');
-          Alert.alert('Warning', 'Member created but subscription setup failed.');
+          if (Platform.OS === 'web') {
+            window.alert('Member created but subscription setup failed.');
+          } else {
+            Alert.alert('Warning', 'Member created but subscription setup failed.');
+          }
         }
       }
 
       const addedMemberName = newMember.full_name;
 
-      // Close modal
+      // Step 10: Reset form and close modal
       setShowAddMember(false);
-
-      // Reset form
       setNewMember({
         full_name: '',
         email: '',
         phone: '',
-        password: '',
+        password: '123456',
         has_personal_training: false,
-        weight: '', // NEW
-        height: '', // NEW
+        weight: '',
+        height: '',
+        batch: 'morning',
+        profile_photo_uri: '',
       });
       setSelectedSubscription(null);
       setPaymentMethod('none');
       setAmountReceived('');
       setReceiptNumber('');
       setPaymentNotes('');
-      setCustomStartDate(new Date());
+      setCustomStartDate(new Date().toISOString().split('T')[0]);
       setShowDatePicker(false);
 
-      // Refresh member list
+      // Step 11: Refresh member list
       await fetchMembers();
 
-      // Show success
+      // Step 12: Show success message
       setTimeout(() => {
+        const successMessage = uploadedPhotoUrl
+          ? `${addedMemberName} added successfully with profile photo!`
+          : newMember.profile_photo_uri
+            ? `${addedMemberName} added! (Photo upload had issues, you can update it later)`
+            : `${addedMemberName} added successfully!`;
+
         if (Platform.OS === 'web') {
-          window.alert(`Success\n\n${addedMemberName} added successfully!`);
+          window.alert(`Success\n\n${successMessage}`);
         } else {
-          Alert.alert('Success', `${addedMemberName} added successfully!`);
+          Alert.alert('Success', successMessage);
         }
       }, 300);
 
     } catch (error: any) {
+      console.error('❌ Add member error:', error);
       const errorMessage = error?.message || 'Failed to add member';
       if (errorMessage.includes('already registered')) {
-        window.alert('This email is already registered')
-        Alert.alert('Error', 'This email is already registered');
+        if (Platform.OS === 'web') {
+          window.alert('This email is already registered');
+        } else {
+          Alert.alert('Error', 'This email is already registered');
+        }
       } else {
-        Alert.alert('Error', errorMessage);
+        if (Platform.OS === 'web') {
+          window.alert(`Error: ${errorMessage}`);
+        } else {
+          Alert.alert('Error', errorMessage);
+        }
       }
     } finally {
       setIsLoading(false);
@@ -861,7 +1140,6 @@ export default function MembersScreen() {
           amount: totalAmount,
           currency: 'INR',
           start_date: getDateAsISO(customStartDate),
-          tax_amount: 0,
           total_amount: totalAmount,
           remaining_amount: newPending,
           payment_status: newStatus,
@@ -1008,7 +1286,6 @@ export default function MembersScreen() {
           payment_type: renewPaymentMethod,
           amount: renewSubscription.price,
           currency: 'INR',
-          tax_amount: 0,
           total_amount: renewSubscription.price,
           remaining_amount: pending,
           payment_status: paymentStatus,
@@ -1055,6 +1332,141 @@ export default function MembersScreen() {
     } catch (error: any) {
       console.error('Error renewing subscription:', error);
       Alert.alert('Error', error.message || 'Failed to renew subscription');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  // Replace the handleSendPaymentReminder function with this corrected version:
+
+  const handleSendPaymentReminder = async (member: MemberDetails) => {
+    try {
+      setIsLoading(true);
+
+      // Check if member has pending payment
+      if (!member.currentSubscription || (member.currentSubscription.pending_amount || 0) <= 0) {
+        Alert.alert('No Pending Payment', 'This member has no pending payment.');
+        return;
+      }
+
+      // Web platform check
+      if (Platform.OS === 'web') {
+        Alert.alert('Not Supported on Web', 'WhatsApp sharing is only available on mobile devices.');
+        return;
+      }
+
+      // Fetch phone number
+      let phoneNumber = member.phone?.replace(/[^0-9]/g, '');
+
+      if (!phoneNumber) {
+        Alert.alert('Error', 'Member phone number not found. Please add a phone number for this member in their profile.');
+        return;
+      }
+
+      // Validate phone number length
+      if (phoneNumber.length < 10) {
+        Alert.alert('Error', 'Invalid phone number. Please check the member\'s phone number.');
+        return;
+      }
+
+      // Add country code if not present
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = '91' + phoneNumber;
+      }
+
+      const pendingAmount = member.currentSubscription.pending_amount || 0;
+      const paidAmount = member.currentSubscription.paid_amount || 0;
+      const totalAmount = member.currentSubscription.total_amount || 0;
+      const planName = member.currentSubscription.subscription?.name || 'Subscription';
+      const endDate = new Date(member.currentSubscription.end_date).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+      });
+
+      // ⭐ FIX: Get gym name from profile instead of non-existent gym variable
+      let gymName = 'Gym';
+      if (profile?.gym_id) {
+        const { data: gymData } = await supabase
+          .from('gyms')
+          .select('name')
+          .eq('id', profile.gym_id)
+          .single();
+
+        if (gymData) {
+          gymName = gymData.name;
+        }
+      }
+
+      const message = `Hi ${member.full_name} 👋
+
+This is a friendly reminder about your pending payment.
+
+*Payment Details:*
+Plan: ${planName}
+Total Amount: ${formatRupees(totalAmount)}
+Paid: ${formatRupees(paidAmount)} ✅
+*Pending: ${formatRupees(pendingAmount)}* ⚠️
+
+Valid Till: ${endDate}
+
+Please complete your payment at your earliest convenience to continue enjoying uninterrupted access to our facilities.
+
+For any queries, feel free to contact us.
+
+Thank you!
+${gymName}`;
+
+      // Try different WhatsApp URL formats
+      const whatsappUrls = [
+        `whatsapp://send?phone=${phoneNumber}&text=${encodeURIComponent(message)}`,
+        `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`,
+        `https://api.whatsapp.com/send?phone=${phoneNumber}&text=${encodeURIComponent(message)}`
+      ];
+
+      let whatsappOpened = false;
+
+      // Try opening WhatsApp with message
+      for (const url of whatsappUrls) {
+        try {
+          const canOpen = await Linking.canOpenURL(url);
+          if (canOpen) {
+            await Linking.openURL(url);
+            whatsappOpened = true;
+
+            // Log reminder sent (only if table exists)
+            try {
+              await supabase.from('payment_reminders').insert({
+                user_id: member.id,
+                subscription_id: member.currentSubscription.id,
+                pending_amount: pendingAmount,
+                sent_by: profile?.id,
+                gym_id: profile?.gym_id,
+                sent_at: new Date().toISOString(),
+              });
+            } catch (logError) {
+              // Ignore if table doesn't exist
+              console.log('Payment reminders log skipped');
+            }
+
+            Alert.alert('Success', 'Payment reminder sent via WhatsApp!');
+            break;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+
+      if (!whatsappOpened) {
+        Alert.alert(
+          'WhatsApp Not Available',
+          'WhatsApp is not installed on this device. Please install WhatsApp to send reminders.',
+          [{ text: 'OK', style: 'cancel' }]
+        );
+      }
+
+    } catch (error: any) {
+      console.error('Error sending payment reminder:', error);
+      Alert.alert('Error', 'Failed to send reminder: ' + (error?.message || 'Unknown error'));
     } finally {
       setIsLoading(false);
     }
@@ -1116,6 +1528,49 @@ export default function MembersScreen() {
       borderWidth: 1.5,
       borderColor: theme.colors.border,
       gap: 12,
+    },
+    batchDropdown: {
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      backgroundColor: theme.colors.card,
+      overflow: 'hidden',
+    },
+    batchOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    batchOptionLast: {
+      borderBottomWidth: 0,
+    },
+    batchOptionSelected: {
+      backgroundColor: theme.colors.primary + '10',
+    },
+    batchOptionText: {
+      fontSize: 16,
+      color: theme.colors.text,
+      fontWeight: '500',
+    },
+    batchOptionTextSelected: {
+      color: theme.colors.primary,
+      fontWeight: '700',
+    },
+    batchBadge: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+      backgroundColor: theme.colors.primary + '20',
+    },
+    batchBadgeText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: theme.colors.primary,
+      textTransform: 'capitalize',
     },
     searchInput: {
       flex: 1,
@@ -1226,6 +1681,19 @@ export default function MembersScreen() {
       shadowOpacity: 0.3,
       shadowRadius: 8,
       elevation: 8,
+    },
+    photoOverlay: {
+      position: 'absolute',
+      bottom: 0,
+      right: 0,
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: theme.colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: theme.colors.card,
     },
     modalSafeArea: {
       flex: 1,
@@ -2215,7 +2683,14 @@ export default function MembersScreen() {
                 <Card key={member.id} style={styles.memberCard}>
                   <View style={styles.memberInfo}>
                     <View style={styles.memberAvatar}>
-                      <User size={24} color="#FFFFFF" />
+                      {member.profile_photo_url ? (
+                        <Image
+                          source={{ uri: member.profile_photo_url }}
+                          style={{ width: 50, height: 50, borderRadius: 25 }}
+                        />
+                      ) : (
+                        <User size={24} color="#FFFFFF" />
+                      )}
                     </View>
                     <View style={styles.memberDetails}>
                       {/* Name and Status Badges */}
@@ -2262,6 +2737,7 @@ export default function MembersScreen() {
                             {member.currentSubscription.subscription?.name || 'Plan'}
                           </Text>
                           <View style={styles.subscriptionDates}>
+
                             <Text style={styles.subscriptionDate}>
                               Start: {new Date(member.currentSubscription.start_date).toLocaleDateString()}
                             </Text>
@@ -2313,6 +2789,7 @@ export default function MembersScreen() {
           <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
             <View style={styles.modalContainer}>
               <View style={styles.modalHeader}>
+
                 <Text style={styles.modalTitle}>Add New Member</Text>
                 <TouchableOpacity onPress={() => setShowAddMember(false)} style={styles.closeButton}>
                   <X size={24} color={theme.colors.text} />
@@ -2326,6 +2803,62 @@ export default function MembersScreen() {
                 keyboardShouldPersistTaps="handled"
               >
                 {/* Personal Information */}
+                {/* After Phone Input */}
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Profile Photo (Optional)</Text>
+
+                  {newMember.profile_photo_uri ? (
+                    <View style={{ alignItems: 'center', gap: 12 }}>
+                      <Image
+                        source={{ uri: newMember.profile_photo_uri }}
+                        style={{
+                          width: 120,
+                          height: 120,
+                          borderRadius: 60,
+                          borderWidth: 3,
+                          borderColor: theme.colors.primary,
+                        }}
+                      />
+                      <View style={{ flexDirection: 'row', gap: 12 }}>
+                        <Button
+                          title="Change Photo"
+                          onPress={pickImage}
+                          variant="outline"
+                          style={{ flex: 1 }}
+                        />
+                        <Button
+                          title="Remove"
+                          onPress={() => setNewMember({ ...newMember, profile_photo_uri: '' })}
+                          variant="outline"
+                          style={{ flex: 1, borderColor: theme.colors.error }}
+                          textStyle={{ color: theme.colors.error }}
+                        />
+                      </View>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={{
+                        borderWidth: 2,
+                        borderColor: theme.colors.border,
+                        borderStyle: 'dashed',
+                        borderRadius: 12,
+                        padding: 32,
+                        alignItems: 'center',
+                        backgroundColor: theme.colors.background,
+                      }}
+                      onPress={pickImage}
+                      activeOpacity={0.7}
+                    >
+                      <User size={48} color={theme.colors.textSecondary} />
+                      <Text style={[styles.inputLabel, { marginTop: 12, marginBottom: 4 }]}>
+                        Upload Photo
+                      </Text>
+                      <Text style={styles.helperText}>
+                        Tap to take photo or choose from gallery
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>Full Name *</Text>
                   <TextInput
@@ -2442,6 +2975,81 @@ export default function MembersScreen() {
                       keyboardType="decimal-pad"
                     />
                   </View>
+                </View>
+                {/* Batch Selection */}
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Training Batch *</Text>
+                  <View style={styles.batchDropdown}>
+                    <TouchableOpacity
+                      style={[
+                        styles.batchOption,
+                        newMember.batch === 'morning' && styles.batchOptionSelected,
+                      ]}
+                      onPress={() => setNewMember({ ...newMember, batch: 'morning' })}
+                      activeOpacity={0.7}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Text style={{ fontSize: 20 }}>🌅</Text>
+                        <Text style={[
+                          styles.batchOptionText,
+                          newMember.batch === 'morning' && styles.batchOptionTextSelected,
+                        ]}>
+                          Morning
+                        </Text>
+                      </View>
+                      {newMember.batch === 'morning' && (
+                        <CheckCircle size={20} color={theme.colors.primary} />
+                      )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.batchOption,
+                        newMember.batch === 'evening' && styles.batchOptionSelected,
+                      ]}
+                      onPress={() => setNewMember({ ...newMember, batch: 'evening' })}
+                      activeOpacity={0.7}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Text style={{ fontSize: 20 }}>🌆</Text>
+                        <Text style={[
+                          styles.batchOptionText,
+                          newMember.batch === 'evening' && styles.batchOptionTextSelected,
+                        ]}>
+                          Evening
+                        </Text>
+                      </View>
+                      {newMember.batch === 'evening' && (
+                        <CheckCircle size={20} color={theme.colors.primary} />
+                      )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.batchOption,
+                        styles.batchOptionLast,
+                        newMember.batch === 'night' && styles.batchOptionSelected,
+                      ]}
+                      onPress={() => setNewMember({ ...newMember, batch: 'night' })}
+                      activeOpacity={0.7}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Text style={{ fontSize: 20 }}>🌙</Text>
+                        <Text style={[
+                          styles.batchOptionText,
+                          newMember.batch === 'night' && styles.batchOptionTextSelected,
+                        ]}>
+                          Night
+                        </Text>
+                      </View>
+                      {newMember.batch === 'night' && (
+                        <CheckCircle size={20} color={theme.colors.primary} />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.helperText}>
+                    Select the training batch for this member
+                  </Text>
                 </View>
 
                 <View style={styles.sectionDivider} />
@@ -3129,32 +3737,77 @@ export default function MembersScreen() {
                     {/* Member Overview - NO EMAIL/PHONE */}
                     <Card style={styles.overviewCard}>
                       <View style={styles.overviewHeader}>
-                        <View style={styles.memberAvatarLarge}>
-                          <User size={32} color="#ffffff" />
-                        </View>
+                        {/* Photo with Update Option */}
+                        <TouchableOpacity
+                          style={styles.memberAvatarLarge}
+                          onPress={() => updateMemberPhoto(selectedMember.id)}
+                          activeOpacity={0.7}
+                        >
+                          {selectedMember.profile_photo_url ? (
+                            <Image
+                              source={{ uri: selectedMember.profile_photo_url }}
+                              style={{ width: 64, height: 64, borderRadius: 32 }}
+                            />
+                          ) : (
+                            <User size={32} color="#ffffff" />
+                          )}
+                          {/* Camera Icon Overlay */}
+                          <View style={styles.photoOverlay}>
+                            <Ionicons name="camera" size={16} color="#FFFFFF" />
+                          </View>
+                        </TouchableOpacity>
+
                         <View style={styles.overviewInfo}>
                           <Text style={styles.overviewName}>{selectedMember.full_name}</Text>
                           <View style={styles.overviewStats}>
                             <Text style={styles.overviewLevel}>Level {selectedMember.level}</Text>
                             <Text style={styles.overviewPoints}>{selectedMember.total_points} XP</Text>
-                            <Text style={styles.overviewStreak}>{selectedMember.current_streak} day streak</Text>
                           </View>
                           <View style={styles.overviewStats}>
-
-                            <Text style={styles.height}>Height {selectedMember.height || 0}</Text>
-                            <Text style={styles.weight}>weight {selectedMember.weight || 0}</Text>
+                            <Text style={styles.height}>
+                              Height: {selectedMember.height ? `${selectedMember.height} cm` : 'N/A'}
+                            </Text>
+                          </View>
+                          <View style={styles.overviewStats}>
+                            <Text style={styles.weight}>
+                              Weight: {selectedMember.weight ? `${selectedMember.weight} kg` : 'N/A'}
+                            </Text>
                           </View>
                         </View>
+
+                        {selectedMember.batch && (
+                          <View style={styles.batchBadge}>
+                            <Text style={styles.batchBadgeText}>
+                              {selectedMember.batch === 'morning' && '🌅 '}
+                              {selectedMember.batch === 'evening' && '🌆 '}
+                              {selectedMember.batch === 'night' && '🌙 '}
+                              {selectedMember.batch.charAt(0).toUpperCase() + selectedMember.batch.slice(1)}
+                            </Text>
+                          </View>
+                        )}
                       </View>
+
+                      {/* Update Photo Button */}
+                      <Button
+                        title={updatingPhoto ? "Uploading..." : "Update Profile Photo"}
+                        onPress={() => updateMemberPhoto(selectedMember.id)}
+                        variant="primary"
+                        isLoading={updatingPhoto}
+                        style={{ marginTop: 12 }}
+                      />
+                      
 
                       {/* Attendance Calendar Button */}
                       <Button
                         title="View Attendance Calendar"
                         onPress={() => fetchMemberAttendance(selectedMember.id)}
                         variant="outline"
-                        style={{ marginTop: 16 }}
+                        style={{ marginTop: 12 }}
                       />
                     </Card>
+
+
+                    <InvoicesList userId={selectedMember.id} onRefresh={loadInvoices} />
 
                     {/* Personal Training Toggle */}
                     <Card style={styles.overviewCard}>
@@ -3322,30 +3975,60 @@ export default function MembersScreen() {
                             </View>
                           </View>
 
-                          {/* Pay Pending Button */}
-                          {(selectedMember.currentSubscription.pending_amount || 0) > 0 && (
-                            <Button
-                              title={`Pay Pending ${formatRupees(selectedMember.currentSubscription.pending_amount)}`}
-                              onPress={() => {
-                                setPendingPaymentAmount('');
-                                setPendingReceiptNumber('');
-                                setPendingPaymentNotes('');
-                                // Close details modal first, then open payment modal
-                                setShowMemberDetails(false);
-                                setTimeout(() => {
-                                  setShowPayPendingModal(true);
-                                }, 300);
-                              }}
-                              variant="outline"
-                              style={{
-                                marginTop: 16,
-                                borderColor: theme.colors.warning,
-                                backgroundColor: theme.colors.warning + '10',
-                              }}
-                              textStyle={{ color: theme.colors.warning }}
-                            />
-                          )}
 
+                          {/* Payment Actions - Pay Pending & Reminder */}
+                          {(selectedMember.currentSubscription.pending_amount || 0) > 0 && (
+                            <View style={{ gap: 12, marginTop: 16 }}>
+                              {/* Pay Pending Button */}
+                              <Button
+                                title={`Pay Pending ${formatRupees(selectedMember.currentSubscription.pending_amount)}`}
+                                onPress={() => {
+                                  setPendingPaymentAmount('');
+                                  setPendingReceiptNumber('');
+                                  setPendingPaymentNotes('');
+                                  setShowMemberDetails(false);
+                                  setTimeout(() => {
+                                    setShowPayPendingModal(true);
+                                  }, 300);
+                                }}
+                                variant="outline"
+                                style={{
+                                  borderColor: theme.colors.warning,
+                                  // backgroundColor: theme.colors.warning + '10',
+                                }}
+                                textStyle={{ color: theme.colors.warning }}
+                              />
+
+                              {/* Payment Reminder Button */}
+                              <TouchableOpacity
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  paddingVertical: 14,
+                                  paddingHorizontal: 16,
+                                  borderRadius: 12,
+                                  borderWidth: 1.5,
+                                  borderColor: theme.colors.success,
+                                  backgroundColor: theme.colors.success + '10',
+                                  gap: 8,
+                                }}
+                                onPress={() => handleSendPaymentReminder(selectedMember)}
+                                activeOpacity={0.7}
+                                disabled={isLoading}
+                              >
+                                <Ionicons name="logo-whatsapp" size={20} color={theme.colors.success} />
+                                <Text style={{
+                                  fontSize: 15,
+                                  fontWeight: '600',
+                                  color: theme.colors.success,
+                                  fontFamily: 'Inter-SemiBold',
+                                }}>
+                                  Send Payment Reminder
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
                           <Button
                             title="Renew Subscription"
                             onPress={() => {

@@ -8,7 +8,6 @@ import {
   Modal,
   ScrollView,
   Alert,
-  Share,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,17 +19,20 @@ import {
   Download,
   X,
   Calendar,
-  DollarSign,
   Building2,
   CreditCard,
   CheckCircle,
   AlertCircle,
-  Eye,
+  Mail,
+  MessageCircle
 } from 'lucide-react-native';
 import { formatRupees } from '@/lib/currency';
 import { generateInvoiceHTML } from '@/lib/invoicePDF';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as MailComposer from 'expo-mail-composer';
+import * as FileSystem from 'expo-file-system/legacy';
+import { Linking } from 'react-native';
 
 const COLORS = {
   primary: '#3B82F6',
@@ -60,7 +62,7 @@ interface Invoice {
   payment_status: string;
   invoice_date: string;
   due_date?: string;
-  items: any[];
+  items: any;
   payment_id?: string;
   subscription_id?: string;
   is_installment?: boolean;
@@ -92,30 +94,62 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [processingInvoiceId, setProcessingInvoiceId] = useState<string | null>(null);
+  // Platform check
+  const isWeb = Platform.OS === 'web';
 
   useEffect(() => {
     fetchInvoices();
-    console.log('Fetching invoices for userId:', userId);
-
   }, [userId]);
+
+  const parseInvoiceItems = (items: any): any[] => {
+    // Handle if items is already an array
+    if (Array.isArray(items)) {
+      return items;
+    }
+
+    // Handle if items is a JSON string
+    if (typeof items === 'string') {
+      try {
+        const parsed = JSON.parse(items);
+        return Array.isArray(parsed) ? parsed : [parsed];
+      } catch (e) {
+        console.error('Error parsing items:', e);
+        return [];
+      }
+    }
+
+    // Handle if items is an object
+    if (items && typeof items === 'object') {
+      return [items];
+    }
+
+    // Default empty array
+    return [];
+  };
 
   const fetchInvoices = async () => {
     try {
       setIsLoading(true);
       const { data, error } = await supabase
-  .from('invoices')
-  .select(`
+        .from('invoices')
+        .select(`
     *,
+    user:profiles!invoices_user_id_fkey(full_name, email, phone),
     gym:gyms(name, location, phone, email)
   `)
-  .eq('user_id', userId)
-  .order('invoice_date', { ascending: false });
-
-        console.log('Invoices raw:', data, error);
+        .eq('user_id', userId)
+        .order('invoice_date', { ascending: false });
 
       if (error) throw error;
-      setInvoices(data || []);
+
+      // Parse items for each invoice
+      const parsedInvoices = (data || []).map(invoice => ({
+        ...invoice,
+        items: parseInvoiceItems(invoice.items)
+      }));
+
+      setInvoices(parsedInvoices);
     } catch (error) {
       console.error('Error fetching invoices:', error);
       Alert.alert('Error', 'Failed to load invoices');
@@ -124,42 +158,340 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
     }
   };
 
-  const handleDownloadInvoice = async (invoice: Invoice) => {
+  const generatePDFForSharing = async (invoice: Invoice): Promise<string | null> => {
     try {
-      setIsDownloading(true);
+      // Ensure items are parsed
+      const invoiceWithParsedItems = {
+        ...invoice,
+        items: parseInvoiceItems(invoice.items)
+      };
 
-      // Generate HTML
-      const html = generateInvoiceHTML(invoice);
+      const html = generateInvoiceHTML(invoiceWithParsedItems);
 
-      // Create PDF
+      if (!html) {
+        throw new Error('Failed to generate invoice HTML');
+      }
+
+      // Web platform
+      if (Platform.OS === 'web') {
+        const { uri } = await Print.printToFileAsync({ html });
+        return uri;
+      }
+
+      // Mobile platforms - use base64 for better compatibility
       const { uri } = await Print.printToFileAsync({
         html,
         base64: false,
       });
 
-      // Share or save PDF
-      if (Platform.OS === 'ios') {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'application/pdf',
-          dialogTitle: `Invoice ${invoice.invoice_number}`,
-          UTI: 'com.adobe.pdf',
-        });
-      } else {
-        // Android
-        await Sharing.shareAsync(uri);
+      return uri;
+    } catch (error: any) {
+      console.error('Error generating PDF:', error);
+      Alert.alert('PDF Generation Error', error?.message || 'Failed to generate PDF');
+      return null;
+    }
+  };
+
+  const handleSendWhatsApp = async (invoice: Invoice) => {
+    try {
+      setProcessingInvoiceId(invoice.id);
+  
+      // Web platform check
+      if (Platform.OS === 'web') {
+        Alert.alert('Not Supported on Web', 'WhatsApp sharing is only available on mobile devices.');
+        setProcessingInvoiceId(null);
+        return;
+      }
+  
+      // Fetch phone number
+      let phoneNumber = null;
+      
+      try {
+        const { data: userData, error: userError } = await supabase
+          .from('profiles')
+          .select('phone')
+          .eq('id', userId)
+          .single();
+        
+        if (userError) throw userError;
+        
+        phoneNumber = userData?.phone?.replace(/[^0-9]/g, '');
+      } catch (error) {
+        console.error('Error fetching user phone:', error);
+      }
+  
+      if (!phoneNumber) {
+        Alert.alert('Error', 'Member phone number not found. Please add a phone number for this member in their profile.');
+        setProcessingInvoiceId(null);
+        return;
+      }
+  
+      // Validate phone number length
+      if (phoneNumber.length < 10) {
+        Alert.alert('Error', 'Invalid phone number. Please check the member\'s phone number.');
+        setProcessingInvoiceId(null);
+        return;
+      }
+  
+      // Add country code if not present
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = '91' + phoneNumber;
+      }
+  
+      // Generate PDF first
+      const pdfUri = await generatePDFForSharing(invoice);
+      if (!pdfUri) {
+        setProcessingInvoiceId(null);
+        return;
+      }
+  
+      const paidAmount = calculatePaidAmount(invoice);
+      const remainingAmount = calculateRemainingAmount(invoice);
+  
+      const message = `Hello ${invoice.user?.full_name || 'Member'},
+  
+  Your invoice ${invoice.invoice_number} is ready.
+  
+  *Invoice Details:*
+  Amount: ${formatRupees(invoice.total_amount)}
+  Paid: ${formatRupees(paidAmount)}
+  ${remainingAmount > 0 ? `Remaining: ${formatRupees(remainingAmount)}` : ''}
+  Status: ${invoice.payment_status.toUpperCase()}
+  Date: ${new Date(invoice.invoice_date).toLocaleDateString('en-IN')}
+  
+  Thank you!
+  ${invoice.gym?.name || 'Gym'}`;
+  
+      // Try different WhatsApp URL formats
+      const whatsappUrls = [
+        `whatsapp://send?phone=${phoneNumber}&text=${encodeURIComponent(message)}`,
+        `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`,
+        `https://api.whatsapp.com/send?phone=${phoneNumber}&text=${encodeURIComponent(message)}`
+      ];
+  
+      let whatsappOpened = false;
+  
+      // Try opening WhatsApp with message
+      for (const url of whatsappUrls) {
+        try {
+          const canOpen = await Linking.canOpenURL(url);
+          if (canOpen) {
+            await Linking.openURL(url);
+            whatsappOpened = true;
+            break;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+  
+      if (!whatsappOpened) {
+        Alert.alert(
+          'WhatsApp Not Available',
+          'WhatsApp is not installed on this device. Would you like to share the invoice another way?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Share', onPress: () => handleDownloadInvoice(invoice) }
+          ]
+        );
+        setProcessingInvoiceId(null);
+        return;
+      }
+  
+      // Show alert with instructions and option to share PDF
+      Alert.alert(
+        'Share Invoice PDF',
+        'WhatsApp chat opened. Now share the invoice PDF?',
+        [
+          { 
+            text: 'Cancel', 
+            style: 'cancel',
+            onPress: () => setProcessingInvoiceId(null)
+          },
+          { 
+            text: 'Share PDF', 
+            onPress: async () => {
+              try {
+                const shareAvailable = await Sharing.isAvailableAsync();
+                if (shareAvailable) {
+                  await Sharing.shareAsync(pdfUri, {
+                    mimeType: 'application/pdf',
+                    dialogTitle: `Invoice ${invoice.invoice_number}`,
+                    UTI: 'com.adobe.pdf',
+                  });
+                }
+              } catch (shareError) {
+                console.error('Share error:', shareError);
+                Alert.alert('Error', 'Failed to share PDF');
+              } finally {
+                setProcessingInvoiceId(null);
+              }
+            }
+          }
+        ]
+      );
+  
+    } catch (error: any) {
+      console.error('Error sending WhatsApp:', error);
+      Alert.alert('Error', 'Failed to send via WhatsApp: ' + (error?.message || 'Unknown error'));
+      setProcessingInvoiceId(null);
+    }
+  };
+
+  const handleSendEmail = async (invoice: Invoice) => {
+    try {
+      setProcessingInvoiceId(invoice.id);
+
+      const userEmail = invoice.user?.email;
+      if (!userEmail) {
+        Alert.alert('Error', 'Member email not found');
+        setProcessingInvoiceId(null);
+        return;
       }
 
-      Alert.alert('Success', 'Invoice downloaded successfully!');
-    } catch (error) {
+      // Web platform
+      if (Platform.OS === 'web') {
+        Alert.alert('Not Supported on Web', 'Please use the mobile app to send emails with attachments.');
+        setProcessingInvoiceId(null);
+        return;
+      }
+
+      // Mobile platforms - check email availability
+      const isAvailable = await MailComposer.isAvailableAsync();
+      if (!isAvailable) {
+        Alert.alert('Error', 'Email is not configured on this device. Please set up an email account in your device settings.');
+        setProcessingInvoiceId(null);
+        return;
+      }
+
+      // Generate PDF first
+      const pdfUri = await generatePDFForSharing(invoice);
+      if (!pdfUri) {
+        setProcessingInvoiceId(null);
+        return;
+      }
+
+      const paidAmount = calculatePaidAmount(invoice);
+      const remainingAmount = calculateRemainingAmount(invoice);
+
+      const emailSubject = `Invoice ${invoice.invoice_number} - ${invoice.gym?.name || 'Gym'}`;
+      const emailBody = `Dear ${invoice.user?.full_name || 'Member'},
+  
+  Please find attached your invoice.
+  
+  Invoice Details:
+  ━━━━━━━━━━━━━━━━━━━━
+  Invoice Number: ${invoice.invoice_number}
+  Date: ${new Date(invoice.invoice_date).toLocaleDateString('en-IN', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      })}
+  
+  Amount Details:
+  ━━━━━━━━━━━━━━━━━━━━
+  Total Amount: ${formatRupees(invoice.total_amount)}
+  Paid Amount: ${formatRupees(paidAmount)}
+  ${remainingAmount > 0 ? `Remaining: ${formatRupees(remainingAmount)}` : ''}
+  Status: ${invoice.payment_status.toUpperCase()}
+  
+  Thank you for your payment!
+  
+  Best regards,
+  ${invoice.gym?.name || 'Gym Team'}`;
+
+      // Prepare attachment based on platform
+      let finalAttachmentPath = pdfUri;
+
+      if (Platform.OS === 'android') {
+        // Android needs a proper file path
+        const fileName = `Invoice_${invoice.invoice_number.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+        const newPath = `${FileSystem.documentDirectory}${fileName}`;
+
+        await FileSystem.copyAsync({
+          from: pdfUri,
+          to: newPath,
+        });
+
+        finalAttachmentPath = newPath;
+      }
+
+      // Compose email with attachment
+      const result = await MailComposer.composeAsync({
+        recipients: [userEmail],
+        subject: emailSubject,
+        body: emailBody,
+        attachments: [finalAttachmentPath],
+        isHtml: false,
+      });
+
+      if (result.status === 'sent') {
+        Alert.alert('Success', 'Invoice email sent successfully!');
+      } else if (result.status === 'saved') {
+        Alert.alert('Saved', 'Email saved to drafts');
+      } else if (result.status === 'cancelled') {
+        Alert.alert('Cancelled', 'Email sending was cancelled');
+      }
+
+      setProcessingInvoiceId(null);
+    } catch (error: any) {
+      console.error('Error sending email:', error);
+      Alert.alert('Error', 'Failed to send email: ' + (error?.message || 'Unknown error'));
+      setProcessingInvoiceId(null);
+    }
+  };
+
+  const handleDownloadInvoice = async (invoice: Invoice) => {
+    try {
+      setProcessingInvoiceId(invoice.id);
+
+      const pdfUri = await generatePDFForSharing(invoice);
+      if (!pdfUri) {
+        setProcessingInvoiceId(null);
+        return;
+      }
+
+      // Web platform
+      if (Platform.OS === 'web') {
+        const link = document.createElement('a');
+        link.href = pdfUri;
+        link.download = `Invoice_${invoice.invoice_number}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        Alert.alert('Success', 'Invoice downloaded successfully!');
+        setProcessingInvoiceId(null);
+        return;
+      }
+
+      // Mobile platforms
+      const shareAvailable = await Sharing.isAvailableAsync();
+
+      if (shareAvailable) {
+        await Sharing.shareAsync(pdfUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: `Save Invoice ${invoice.invoice_number}`,
+          UTI: 'com.adobe.pdf',
+        });
+
+        if (Platform.OS === 'android') {
+          Alert.alert('Success', 'Invoice ready to save! Choose a location from the share menu.');
+        }
+      } else {
+        Alert.alert('Error', 'Sharing is not available on this device');
+      }
+
+      setProcessingInvoiceId(null);
+    } catch (error: any) {
       console.error('Error downloading invoice:', error);
-      Alert.alert('Error', 'Failed to download invoice');
-    } finally {
-      setIsDownloading(false);
+      Alert.alert('Error', 'Failed to download invoice: ' + (error?.message || 'Unknown error'));
+      setProcessingInvoiceId(null);
     }
   };
 
   const getPaymentStatusBadge = (status: string) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case 'completed':
       case 'paid':
         return {
@@ -187,31 +519,61 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
           bg: COLORS.border,
           color: COLORS.textSecondary,
           icon: AlertCircle,
-          text: status,
+          text: status || 'Unknown',
         };
     }
   };
 
-  const calculatePaidAmount = (invoice: Invoice) => {
-    if (invoice.payment_status === 'completed' || invoice.payment_status === 'paid') {
-      return invoice.total_amount;
-    }
-    if (invoice.original_total_amount && invoice.remaining_amount !== undefined) {
-      return invoice.original_total_amount - invoice.remaining_amount;
-    }
-    return invoice.amount;
-  };
+  const calculatePaidAmount = (invoice: Invoice): number => {
+    if (!invoice) return 0;
 
-  const calculateRemainingAmount = (invoice: Invoice) => {
-    if (invoice.payment_status === 'completed' || invoice.payment_status === 'paid') {
+    const status = invoice.payment_status?.toLowerCase();
+
+    // For completed/paid status, return the amount that was actually paid
+    // This should be the amount field, not total_amount
+    if (status === 'completed' || status === 'paid') {
+      return invoice.total_amount || 0;
+    }
+
+    if (status === 'partial') {
+      const totalAmount = invoice.total_amount || 0;      
+      const remainingAmount = invoice.remaining_amount || 0; 
+      return Math.max(0, totalAmount - remainingAmount); 
+    }
+
+    if (status === 'pending') {
       return 0;
     }
-    if (invoice.remaining_amount !== undefined) {
-      return invoice.remaining_amount;
+
+    return invoice.amount || 0;
+  };
+
+  const calculateRemainingAmount = (invoice: Invoice): number => {
+    if (!invoice) return 0;
+
+    const status = invoice.payment_status?.toLowerCase();
+
+    if (status === 'completed' || status === 'paid') {
+      return 0;
     }
-    if (invoice.original_total_amount) {
-      return invoice.original_total_amount - invoice.amount;
+
+    // If remaining_amount is explicitly set, use it
+    if (invoice.remaining_amount !== undefined && invoice.remaining_amount !== null) {
+      return Math.max(0, invoice.remaining_amount);
     }
+
+    // For partial payments
+    if (status === 'partial') {
+      const totalAmount = invoice.original_total_amount || invoice.total_amount || 0;
+      const paidAmount = invoice.amount || 0;
+      return Math.max(0, totalAmount - paidAmount);
+    }
+
+    // For pending payments, entire amount is remaining
+    if (status === 'pending') {
+      return invoice.total_amount || 0;
+    }
+
     return 0;
   };
 
@@ -268,17 +630,38 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
                     <Text style={styles.invoiceAmount}>
                       {formatRupees(invoice.total_amount)}
                     </Text>
-                    <TouchableOpacity
-                      style={styles.downloadButton}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleDownloadInvoice(invoice);
-                      }}
-                      disabled={isDownloading}
-                    >
-                      <Download size={14} color={COLORS.primary} />
-                      <Text style={styles.downloadText}>Download</Text>
-                    </TouchableOpacity>
+                    <View style={styles.invoiceActions}>
+                      <TouchableOpacity
+                        style={styles.actionButton}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleSendWhatsApp(invoice);
+                        }}
+                        disabled={processingInvoiceId === invoice.id}
+                      >
+                        <MessageCircle size={14} color="#25D366" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.actionButton}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleSendEmail(invoice);
+                        }}
+                        disabled={processingInvoiceId === invoice.id}
+                      >
+                        <Mail size={14} color={COLORS.primary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.actionButton}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleDownloadInvoice(invoice);
+                        }}
+                        disabled={processingInvoiceId === invoice.id}
+                      >
+                        <Download size={14} color={COLORS.text} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -345,7 +728,7 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
                   {/* Invoice Info */}
                   <Card style={styles.detailCard}>
                     <Text style={styles.detailCardTitle}>Invoice Information</Text>
-                    
+
                     <View style={styles.detailRow}>
                       <View style={styles.detailIcon}>
                         <FileText size={16} color={COLORS.textSecondary} />
@@ -397,7 +780,7 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
                       <View style={styles.detailContent}>
                         <Text style={styles.detailLabel}>Payment Method</Text>
                         <Text style={styles.detailValue}>
-                          {selectedInvoice.payment_type.toUpperCase()}
+                          {selectedInvoice.payment_type?.toUpperCase() || 'N/A'}
                         </Text>
                       </View>
                     </View>
@@ -427,9 +810,9 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
                     </View>
 
                     <View style={styles.amountRow}>
-                      <Text style={styles.amountLabel}>GST (18%)</Text>
+                      <Text style={styles.amountLabel}>GST/Tax</Text>
                       <Text style={styles.amountValue}>
-                        {formatRupees(0)}
+                        {formatRupees(selectedInvoice.total_amount - selectedInvoice.amount)}
                       </Text>
                     </View>
 
@@ -473,9 +856,29 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
                   {/* Actions */}
                   <View style={styles.actionButtons}>
                     <Button
+                      title="Send via WhatsApp"
+                      onPress={() => handleSendWhatsApp(selectedInvoice)}
+                      isLoading={processingInvoiceId === selectedInvoice.id}
+                      disabled={Platform.OS === 'web'}
+                      style={[
+                        styles.actionButtonLarge,
+                        { backgroundColor: Platform.OS === 'web' ? COLORS.textSecondary : '#25D366' }
+                      ]}
+                    />
+                    <Button
+                      title="Send via Email"
+                      onPress={() => handleSendEmail(selectedInvoice)}
+                      isLoading={processingInvoiceId === selectedInvoice.id}
+                      disabled={Platform.OS === 'web'}
+                      style={[
+                        styles.actionButtonLarge,
+                        Platform.OS === 'web' && { backgroundColor: COLORS.textSecondary }
+                      ]}
+                    />
+                    <Button
                       title="Download Invoice"
                       onPress={() => handleDownloadInvoice(selectedInvoice)}
-                      isLoading={isDownloading}
+                      isLoading={processingInvoiceId === selectedInvoice.id}
                       style={styles.downloadButtonLarge}
                     />
                   </View>
@@ -589,19 +992,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.text,
   },
-  downloadButton: {
+  invoiceActions: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: COLORS.primaryLight,
-    borderRadius: 8,
+    gap: 8,
   },
-  downloadText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.primary,
+  actionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   modalSafeArea: {
     flex: 1,
@@ -748,6 +1151,10 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     marginTop: 8,
+    gap: 12,
+  },
+  actionButtonLarge: {
+    minHeight: 52,
   },
   downloadButtonLarge: {
     minHeight: 52,

@@ -12,14 +12,7 @@ import { ThemeProvider } from '@/contexts/ThemeContext';
 import { AppDataProvider } from '@/contexts/AppDataContext';
 import { enableScreens } from 'react-native-screens';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-let AnimatedSplashScreen: any = null;
-const loadSplashScreen = () => {
-  if (!AnimatedSplashScreen) {
-    AnimatedSplashScreen = require('@/components/Splashscreen').default;
-  }
-  return AnimatedSplashScreen;
-};
+import AnimatedSplashScreen from '@/components/Splashscreen'; // ⭐ FIXED: Import directly
 
 enableScreens(true);
 SplashScreen.preventAutoHideAsync();
@@ -32,7 +25,6 @@ function AppContent() {
   const [showSplash, setShowSplash] = useState(false);
   const [showTNC, setShowTNC] = useState(false);
   const [isCheckingStorage, setIsCheckingStorage] = useState(true);
-  const [SplashComponent, setSplashComponent] = useState<any>(null);
   const { user, profile, isLoading } = useAuth();
 
   // Check if splash should be shown (only once)
@@ -42,11 +34,9 @@ function AppContent() {
         const splashShown = await AsyncStorage.getItem(SPLASH_SHOWN_KEY);
         const tncAccepted = await AsyncStorage.getItem(TNC_ACCEPTED_KEY);
         
+        // ⭐ FIXED: Always show splash on first launch
         if (!splashShown) {
-          // First time - show splash
           setShowSplash(true);
-          const Component = loadSplashScreen();
-          setSplashComponent(() => Component);
         }
         
         // Check if T&C needs to be shown
@@ -88,8 +78,8 @@ function AppContent() {
     }
   };
 
-  // Show loading while checking storage or auth
-  if (isCheckingStorage || isLoading) {
+  // ⭐ FIXED: Show loading only while checking storage (not auth)
+  if (isCheckingStorage) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB' }}>
         <ActivityIndicator size="large" color="#3B82F6" />
@@ -97,11 +87,10 @@ function AppContent() {
     );
   }
 
-  // Show splash screen only on first launch
-  if (showSplash && SplashComponent) {
-    const Splash = SplashComponent;
+  // ⭐ FIXED: Show splash screen on first launch with proper props
+  if (showSplash) {
     return (
-      <Splash
+      <AnimatedSplashScreen
         onFinish={handleSplashFinish}
         userId={user?.id}
         gymId={profile?.gym_id}
@@ -124,6 +113,15 @@ function AppContent() {
           }
         }}
       />
+    );
+  }
+
+  // ⭐ FIXED: Show loading while auth is loading (after splash)
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB' }}>
+        <ActivityIndicator size="large" color="#3B82F6" />
+      </View>
     );
   }
 

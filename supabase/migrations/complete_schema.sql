@@ -82,6 +82,35 @@ CREATE TABLE public.diet_plans (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT diet_plans_pkey PRIMARY KEY (id)
 );
+CREATE TABLE public.expenses (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  gym_id uuid,
+  name text NOT NULL,
+  type text NOT NULL CHECK (type = ANY (ARRAY['rent'::text, 'maintenance'::text, 'salary'::text, 'equipment'::text, 'other'::text])),
+  amount numeric NOT NULL,
+  payment_method text,
+  description text,
+  expense_date timestamp with time zone DEFAULT now(),
+  created_at timestamp with time zone DEFAULT now(),
+  created_by uuid,
+  CONSTRAINT expenses_pkey PRIMARY KEY (id),
+  CONSTRAINT expenses_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id),
+  CONSTRAINT expenses_gym_id_fkey FOREIGN KEY (gym_id) REFERENCES public.gyms(id)
+);
+CREATE TABLE public.feedback (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  user_name text NOT NULL,
+  user_email text,
+  feedback_type text DEFAULT 'other'::text CHECK (feedback_type = ANY (ARRAY['bug'::text, 'feature'::text, 'improvement'::text, 'other'::text])),
+  rating integer CHECK (rating >= 1 AND rating <= 5),
+  message text NOT NULL,
+  device_info text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT feedback_pkey PRIMARY KEY (id),
+  CONSTRAINT feedback_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
 CREATE TABLE public.goals (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   title text NOT NULL,
@@ -161,6 +190,21 @@ CREATE TABLE public.gyms (
   CONSTRAINT gyms_pkey PRIMARY KEY (id),
   CONSTRAINT gyms_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES auth.users(id)
 );
+CREATE TABLE public.income (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  gym_id uuid,
+  name text NOT NULL,
+  type text NOT NULL CHECK (type = ANY (ARRAY['product'::text, 'service'::text, 'other'::text])),
+  amount numeric NOT NULL,
+  payment_method text,
+  description text,
+  income_date timestamp with time zone DEFAULT now(),
+  created_at timestamp with time zone DEFAULT now(),
+  created_by uuid,
+  CONSTRAINT income_pkey PRIMARY KEY (id),
+  CONSTRAINT income_gym_id_fkey FOREIGN KEY (gym_id) REFERENCES public.gyms(id),
+  CONSTRAINT income_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.profiles(id)
+);
 CREATE TABLE public.invoices (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   invoice_number text NOT NULL UNIQUE,
@@ -169,7 +213,6 @@ CREATE TABLE public.invoices (
   payment_type text NOT NULL CHECK (payment_type = ANY (ARRAY['cash'::text, 'online'::text, 'razorpay'::text])),
   amount numeric NOT NULL,
   currency text DEFAULT 'INR'::text,
-  tax_amount numeric DEFAULT 0,
   total_amount numeric NOT NULL,
   payment_status text DEFAULT 'paid'::text CHECK (payment_status = ANY (ARRAY['pending'::text, 'partial'::text, 'completed'::text])),
   invoice_date timestamp with time zone DEFAULT now(),
@@ -272,6 +315,21 @@ CREATE TABLE public.payment_installments (
   CONSTRAINT payment_installments_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id),
   CONSTRAINT payment_installments_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
   CONSTRAINT payment_installments_gym_id_fkey FOREIGN KEY (gym_id) REFERENCES public.gyms(id)
+);
+CREATE TABLE public.payment_reminders (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  subscription_id uuid,
+  pending_amount numeric NOT NULL,
+  sent_by uuid,
+  gym_id uuid,
+  sent_at timestamp with time zone DEFAULT now(),
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT payment_reminders_pkey PRIMARY KEY (id),
+  CONSTRAINT payment_reminders_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
+  CONSTRAINT payment_reminders_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES public.user_subscriptions(id),
+  CONSTRAINT payment_reminders_sent_by_fkey FOREIGN KEY (sent_by) REFERENCES public.profiles(id),
+  CONSTRAINT payment_reminders_gym_id_fkey FOREIGN KEY (gym_id) REFERENCES public.gyms(id)
 );
 CREATE TABLE public.payments (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -402,7 +460,7 @@ CREATE TABLE public.profiles (
   email text NOT NULL,
   full_name text NOT NULL,
   role text NOT NULL DEFAULT 'member'::text CHECK (role = ANY (ARRAY['admin'::text, 'member'::text, 'gym_owner'::text])),
-  phone text,
+  phone text UNIQUE,
   gym_id uuid,
   level integer DEFAULT 1,
   total_points integer DEFAULT 0,
@@ -414,6 +472,9 @@ CREATE TABLE public.profiles (
   has_personal_training boolean DEFAULT false,
   weight numeric,
   height numeric,
+  notifications_enabled boolean DEFAULT true,
+  batch text CHECK (batch = ANY (ARRAY['morning'::text, 'evening'::text, 'night'::text])),
+  profile_photo_url text,
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
   CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
   CONSTRAINT profiles_gym_fkey FOREIGN KEY (gym_id) REFERENCES public.gyms(id)

@@ -1118,51 +1118,128 @@ const cancelWorkout = () => {
             ))
           )}
         </ScrollView>
-        <Modal
-          visible={showVideoModal}
-          animationType="slide"
-          presentationStyle="pageSheet"
-          onRequestClose={() => setShowVideoModal(false)}
-        >
-          <SafeAreaView style={styles.videoModalContainer}>
-            <View style={styles.videoModalHeader}>
-              <Text style={styles.videoModalTitle}>Workout Tutorial</Text>
+
+<Modal
+  visible={showVideoModal}
+  animationType="slide"
+  presentationStyle="pageSheet"
+  onRequestClose={() => setShowVideoModal(false)}
+>
+  <SafeAreaView style={styles.videoModalContainer}>
+    <View style={styles.videoModalHeader}>
+      <Text style={styles.videoModalTitle}>Workout Tutorial</Text>
+      <TouchableOpacity
+        onPress={() => setShowVideoModal(false)}
+        style={styles.closeVideoButton}
+      >
+        <X size={24} color={theme.colors.text} />
+      </TouchableOpacity>
+    </View>
+    
+    {selectedVideoUrl && (
+      <>
+        {Platform.OS === 'web' ? (
+          // Web: Use iframe
+          <iframe
+            src={`https://www.youtube.com/embed/${getYouTubeVideoId(selectedVideoUrl)}`}
+            style={{
+              width: '100%',
+              height: '100%',
+              border: 'none',
+            }}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        ) : (
+          // Mobile: Use Linking to open YouTube app or browser
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+            <View style={{ 
+              backgroundColor: theme.colors.card, 
+              padding: 24, 
+              borderRadius: 16,
+              width: '100%',
+              alignItems: 'center',
+              gap: 16,
+            }}>
+              <View style={{ 
+                width: 64, 
+                height: 64, 
+                borderRadius: 32, 
+                backgroundColor: '#FF0000', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }}>
+                <Text style={{ fontSize: 32 }}>▶️</Text>
+              </View>
+              
+              <Text style={{ 
+                fontSize: 18, 
+                fontWeight: '700', 
+                color: theme.colors.text,
+                textAlign: 'center',
+              }}>
+                Watch on YouTube
+              </Text>
+              
+              <Text style={{ 
+                fontSize: 14, 
+                color: theme.colors.textSecondary,
+                textAlign: 'center',
+                lineHeight: 20,
+              }}>
+                This video will open in the YouTube app or your browser for the best viewing experience.
+              </Text>
+              
+              <Button
+                title="Open YouTube Video"
+                onPress={async () => {
+                  try {
+                    const videoId = getYouTubeVideoId(selectedVideoUrl);
+                    if (!videoId) {
+                      Alert.alert('Error', 'Invalid YouTube URL');
+                      return;
+                    }
+
+                    // Try YouTube app first
+                    const youtubeAppUrl = `vnd.youtube://${videoId}`;
+                    const canOpenYouTubeApp = await Linking.canOpenURL(youtubeAppUrl);
+                    
+                    if (canOpenYouTubeApp) {
+                      await Linking.openURL(youtubeAppUrl);
+                    } else {
+                      // Fallback to browser
+                      const youtubeWebUrl = `https://www.youtube.com/watch?v=${videoId}`;
+                      await Linking.openURL(youtubeWebUrl);
+                    }
+                    
+                    setShowVideoModal(false);
+                  } catch (error) {
+                    console.error('Error opening video:', error);
+                    Alert.alert('Error', 'Could not open video. Please try again.');
+                  }
+                }}
+                style={{ width: '100%', minHeight: 52 }}
+              />
+              
               <TouchableOpacity
                 onPress={() => setShowVideoModal(false)}
-                style={styles.closeVideoButton}
+                style={{ padding: 8 }}
               >
-                <X size={24} color={theme.colors.text} />
+                <Text style={{ 
+                  fontSize: 14, 
+                  fontWeight: '600', 
+                  color: theme.colors.textSecondary 
+                }}>
+                  Cancel
+                </Text>
               </TouchableOpacity>
             </View>
-            
-            {selectedVideoUrl && (
-              <>
-                {Platform.OS === 'web' ? (
-                  <iframe
-                    src={`https://www.youtube.com/embed/${getYouTubeVideoId(selectedVideoUrl)}`}
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      border: 'none',
-                    }}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  />
-                ) : (
-                  <WebView
-                    source={{ 
-                      uri: `https://www.youtube.com/embed/${getYouTubeVideoId(selectedVideoUrl)}` 
-                    }}
-                    style={{ flex: 1 }}
-                    allowsFullscreenVideo
-                    javaScriptEnabled
-                    domStorageEnabled
-                  />
-                )}
-              </>
-            )}
-          </SafeAreaView>
-        </Modal>
+          </View>
+        )}
+      </>
+    )}
+  </SafeAreaView>
+</Modal>
       </Animated.View>
 
       
