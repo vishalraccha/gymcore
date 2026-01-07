@@ -24,8 +24,9 @@ import { Button } from '@/components/ui/Button';
 import InvoicesList from "@/components/InvoicesList";
 import { getUserInvoices } from "@/lib/invoice";
 import * as ImagePicker from 'expo-image-picker';
-import { Image } from 'react-native';
+import { Image } from 'expo-image';
 import { uploadMemberPhoto, createBlobFromUri } from '@/lib/storage';
+import * as ImageManipulator from 'expo-image-manipulator';
 import {
   Plus,
   Search,
@@ -147,6 +148,10 @@ export default function MembersScreen() {
   const [showAttendanceCalendar, setShowAttendanceCalendar] = useState(false);
   const [memberAttendance, setMemberAttendance] = useState<any[]>([]);
   const [showPassword, setShowPassword] = useState(false);
+  const [admissionFee, setAdmissionFee] = useState('50');
+const [discountAmount, setDiscountAmount] = useState('');
+const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other' | 'prefer_not_to_say'>('male');
+
   // const [isCreatingMember, setIsCreatingMember] = useState(false);
 
   useEffect(() => {
@@ -155,178 +160,148 @@ export default function MembersScreen() {
     }
   }, [profile?.id]);
 
-// ⭐ FIXED: Pick image and store it properly for mobile
-const pickImage = async () => {
-  try {
-    const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
-    const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  const pickImage = async () => {
+    try {
+      const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
+      const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-    if (cameraStatus !== 'granted' && libraryStatus !== 'granted') {
-      Alert.alert('Permission Required', 'Please allow camera and photo library access');
-      return;
-    }
+      if (cameraStatus !== 'granted' && libraryStatus !== 'granted') {
+        Alert.alert('Permission Required', 'Please allow camera and photo library access');
+        return;
+      }
 
-    Alert.alert(
-      'Upload Photo',
-      'Choose an option',
-      [
-        {
-          text: 'Take Photo',
-          onPress: async () => {
-            if (cameraStatus !== 'granted') {
-              Alert.alert('Permission Denied', 'Camera access required');
-              return;
-            }
+      Alert.alert(
+        'Upload Photo',
+        'Choose an option',
+        [
+          {
+            text: 'Take Photo',
+            onPress: async () => {
+              if (cameraStatus !== 'granted') {
+                Alert.alert('Permission Denied', 'Camera access required');
+                return;
+              }
 
-            const result = await ImagePicker.launchCameraAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              allowsEditing: true,
-              aspect: [1, 1],
-              quality: 0.7, // ⭐ Reduced for faster upload
-              base64: false, // ⭐ Don't need base64
-            });
+              const result = await ImagePicker.launchCameraAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.7, // ⭐ Reduced for faster upload
+                base64: false, // ⭐ Don't need base64
+              });
 
-            if (!result.canceled && result.assets[0]) {
-              setNewMember({ ...newMember, profile_photo_uri: result.assets[0].uri });
-            }
+              if (!result.canceled && result.assets[0]) {
+                setNewMember({ ...newMember, profile_photo_uri: result.assets[0].uri });
+              }
+            },
           },
-        },
-        {
-          text: 'Choose from Gallery',
-          onPress: async () => {
-            if (libraryStatus !== 'granted') {
-              Alert.alert('Permission Denied', 'Photo library access required');
-              return;
-            }
+          {
+            text: 'Choose from Gallery',
+            onPress: async () => {
+              if (libraryStatus !== 'granted') {
+                Alert.alert('Permission Denied', 'Photo library access required');
+                return;
+              }
 
-            const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              allowsEditing: true,
-              aspect: [1, 1],
-              quality: 0.7, // ⭐ Reduced for faster upload
-              base64: false,
-            });
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.7, // ⭐ Reduced for faster upload
+                base64: false,
+              });
 
-            if (!result.canceled && result.assets[0]) {
-              setNewMember({ ...newMember, profile_photo_uri: result.assets[0].uri });
-            }
+              if (!result.canceled && result.assets[0]) {
+                setNewMember({ ...newMember, profile_photo_uri: result.assets[0].uri });
+              }
+            },
           },
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ]
-    );
-  } catch (error) {
-    console.error('Image picker error:', error);
-    Alert.alert('Error', 'Failed to open image picker');
-  }
-};
-
-// ⭐ SIMPLIFIED: Just pass URI directly to storage function
-// ⭐ WORKING: Create blob properly for mobile
-const uploadProfilePhoto = async (userId: string, photoUri: string): Promise<string> => {
-  try {
-    console.log('📸 Starting member photo upload for:', userId);
-    console.log('📸 Photo URI:', photoUri);
-
-    if (!photoUri || photoUri.trim() === '') {
-      throw new Error('Invalid photo URI');
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Image picker error:', error);
+      Alert.alert('Error', 'Failed to open image picker');
     }
+  };
 
-    // ⭐ Create blob using XMLHttpRequest (works on mobile + web)
-    const blob: Blob = await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.onload = function () {
-        resolve(xhr.response as Blob);
-      };
-      xhr.onerror = function (e) {
-        console.error('XHR error:', e);
-        reject(new TypeError('Network request failed'));
-      };
-      xhr.responseType = 'blob';
-      xhr.open('GET', photoUri, true);
-      xhr.send(null);
-    });
+  // ⭐ ANDROID FIXED: Use uploadMemberPhoto from storage lib
+  const uploadProfilePhoto = async (
+    userId: string,
+    photoUri: string
+  ): Promise<string> => {
+    try {
+      console.log('📸 Uploading profile photo for:', userId);
 
-    console.log('✅ Blob created:', (blob.size / 1024).toFixed(2), 'KB');
+      // ✅ JUST CALL STORAGE FUNCTION
+      const photoUrl = await uploadMemberPhoto(photoUri, userId);
 
-    // Upload
-    const photoUrl = await uploadMemberPhoto(blob, userId);
-    console.log('✅ Photo uploaded:', photoUrl);
+      // ✅ Update DB
+      const { error } = await supabase
+        .from('profiles')
+        .update({ profile_photo_url: photoUrl })
+        .eq('id', userId);
 
-    // Update database
-    const { error } = await supabase
-      .from('profiles')
-      .update({ profile_photo_url: photoUrl })
-      .eq('id', userId);
+      if (error) throw error;
 
-    if (error) {
-      console.error('❌ Database update error:', error);
+      console.log('📸 Upload & DB update successful');
+      return photoUrl;
+
+    } catch (error: any) {
+      console.error('📸 Upload failed:', error?.message || error);
       throw error;
     }
+  };
 
-    console.log('✅ Database updated successfully');
-    return photoUrl;
 
-  } catch (error: any) {
-    console.error('❌ Upload failed:', error);
-    const errorMessage = error?.message || 'Failed to upload photo';
-    
-    if (Platform.OS === 'web') {
-      window.alert(`Upload failed: ${errorMessage}`);
-    } else {
-      Alert.alert('Upload Failed', errorMessage);
-    }
-    
-    throw error;
-  }
-};
+  // ⭐ For updating existing member photos with detailed logs
+  const updateMemberPhoto = async (memberId: string) => {
+    try {
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-// ⭐ For updating existing member photos
-const updateMemberPhoto = async (memberId: string) => {
-  try {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please grant permission to access photos');
-      return;
-    }
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please grant photo permission');
+        return;
+      }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-    });
-
-    if (result.canceled || !result.assets?.[0]) {
-      return;
-    }
-
-    setUpdatingPhoto(true);
-
-    const photoUrl = await uploadProfilePhoto(memberId, result.assets[0].uri);
-
-    if (selectedMember) {
-      setSelectedMember({
-        ...selectedMember,
-        profile_photo_url: photoUrl,
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
       });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      setUpdatingPhoto(true);
+
+      const photoUrl = await uploadProfilePhoto(
+        memberId,
+        result.assets[0].uri
+      );
+
+      if (selectedMember) {
+        setSelectedMember({
+          ...selectedMember,
+          profile_photo_url: photoUrl,
+        });
+      }
+
+      await fetchMembers();
+      Alert.alert('Success', 'Profile photo updated successfully');
+
+    } catch (error: any) {
+      console.error('❌ Update failed:', error);
+      Alert.alert('Error', error?.message || 'Failed to update photo');
+    } finally {
+      setUpdatingPhoto(false);
     }
+  };
 
-    await fetchMembers();
-
-    Alert.alert('Success', 'Profile photo updated successfully!');
-
-  } catch (error: any) {
-    console.error('Error updating photo:', error);
-    Alert.alert('Error', error?.message || 'Failed to update photo. Please try again.');
-  } finally {
-    setUpdatingPhoto(false);
-  }
-};
   const loadInvoices = async () => {
     try {
       setLoadingInvoices(true);
@@ -374,6 +349,26 @@ const updateMemberPhoto = async (memberId: string) => {
       useNativeDriver: true,
     }).start();
   }, [profile]);
+
+  const calculateFinalAmount = () => {
+    if (!selectedSubscription) return 0;
+    
+    const planPrice = selectedSubscription.price || 0;
+    const admission = parseFloat(admissionFee) || 0;
+    const discount = parseFloat(discountAmount) || 0;
+    
+    const subtotal = planPrice + admission;
+    const total = subtotal - discount;
+    
+    return Math.max(0, total);
+  };
+  
+  // Add this helper function to calculate remaining after amount received
+  const calculateRemainingAmount = () => {
+    const finalAmount = calculateFinalAmount();
+    const received = parseFloat(amountReceived) || 0;
+    return Math.max(0, finalAmount - received);
+  };
 
   const fetchAvailableSubscriptions = async () => {
     try {
@@ -674,6 +669,7 @@ const updateMemberPhoto = async (memberId: string) => {
 
   const calculatePendingAmount = () => {
     if (!selectedSubscription || !amountReceived) return selectedSubscription?.price || 0;
+    const finalAmount = calculateFinalAmount();
     const received = parseFloat(amountReceived) || 0;
     const total = selectedSubscription.price || 0;
     return Math.max(0, total - received);
@@ -762,6 +758,7 @@ const updateMemberPhoto = async (memberId: string) => {
         height: newMember.height ? parseFloat(newMember.height) : null,
         batch: newMember.batch,
         has_personal_training: newMember.has_personal_training,
+        gender: selectedGender, 
       };
 
       const { error: profileUpdateError } = await supabase
@@ -776,28 +773,23 @@ const updateMemberPhoto = async (memberId: string) => {
 
       console.log('✅ Profile updated with phone and other fields');
 
-      // Step 5: Upload profile photo if provided (BEFORE restoring session)
-      let uploadedPhotoUrl: string | null = null;
       // Step 5: Upload profile photo if provided (AFTER profile is created)
-if (newMember.profile_photo_uri) {
-  try {
-    console.log('📸 Uploading profile photo...');
-    await uploadProfilePhoto(userId, newMember.profile_photo_uri);
-    console.log('✅ Photo uploaded successfully');
-  } catch (photoError: any) {
-    console.error('❌ Photo upload failed:', photoError);
-    // Don't fail member creation
-    if (Platform.OS === 'web') {
-      console.warn('Photo upload failed, continuing...');
-    } else {
-      Alert.alert(
-        'Warning',
-        'Member created but photo upload failed. You can update it later.',
-        [{ text: 'OK' }]
-      );
-    }
-  }
-}
+      let uploadedPhotoUrl: string | null = null;
+      if (newMember.profile_photo_uri) {
+        try {
+          console.log('📸 Uploading profile photo...');
+          uploadedPhotoUrl = await uploadProfilePhoto(userId, newMember.profile_photo_uri);
+
+          if (uploadedPhotoUrl) {
+            console.log('✅ Photo uploaded successfully');
+          } else {
+            console.warn('⚠️ Photo upload failed, but continuing...');
+          }
+        } catch (photoError: any) {
+          console.error('❌ Photo upload failed:', photoError);
+          // Don't fail member creation - just log it
+        }
+      }
 
       // Step 6: Restore admin session
       console.log('🔄 Restoring admin session...');
@@ -836,10 +828,10 @@ if (newMember.profile_photo_uri) {
       // Step 9: Handle subscription if selected
       if ((paymentMethod === 'cash' || paymentMethod === 'online') && selectedSubscription) {
         try {
-          const received = parseFloat(amountReceived);
-          const pending = Math.max(0, selectedSubscription.price - received);
-          const paymentStatus = pending === 0 ? 'completed' : 'partial';
-
+          const finalAmount = calculateFinalAmount();
+const received = parseFloat(amountReceived);
+const pending = Math.max(0, finalAmount - received);
+const paymentStatus = pending === 0 ? 'completed' : 'partial';
           const startDateParts = customStartDate.split('-');
           const startDate = new Date(
             parseInt(startDateParts[0]),
@@ -850,7 +842,7 @@ if (newMember.profile_photo_uri) {
 
           const endDate = new Date(startDate);
           endDate.setDate(endDate.getDate() + (selectedSubscription.duration_days || selectedSubscription.duration_months * 30));
-
+          
           const { data: userSub, error: subError } = await supabase
             .from('user_subscriptions')
             .insert([{
@@ -859,7 +851,9 @@ if (newMember.profile_photo_uri) {
               start_date: customStartDate,
               end_date: endDate.toISOString().split('T')[0],
               custom_start_date: customStartDate,
-              total_amount: selectedSubscription.price,
+              total_amount: finalAmount, // ⭐ CHANGED
+              admission_fee: parseFloat(admissionFee) || 0, // ⭐ NEW
+              discount_amount: parseFloat(discountAmount) || 0, // ⭐ NEW
               paid_amount: received,
               amount_paid: received,
               pending_amount: pending,
@@ -943,6 +937,9 @@ if (newMember.profile_photo_uri) {
         batch: 'morning',
         profile_photo_uri: '',
       });
+      setSelectedGender('male'); // ⭐ ADD THIS
+setAdmissionFee('50'); // ⭐ ADD THIS
+setDiscountAmount('');
       setSelectedSubscription(null);
       setPaymentMethod('none');
       setAmountReceived('');
@@ -956,11 +953,13 @@ if (newMember.profile_photo_uri) {
 
       // Step 12: Show success message
       setTimeout(() => {
-        const successMessage = uploadedPhotoUrl
-          ? `${addedMemberName} added successfully with profile photo!`
-          : newMember.profile_photo_uri
-            ? `${addedMemberName} added! (Photo upload had issues, you can update it later)`
-            : `${addedMemberName} added successfully!`;
+        let successMessage = `${addedMemberName} added successfully!`;
+
+        if (uploadedPhotoUrl) {
+          successMessage = `${addedMemberName} added successfully with profile photo!`;
+        } else if (newMember.profile_photo_uri) {
+          successMessage = `${addedMemberName} added! Photo upload had issues, you can update it later.`;
+        }
 
         if (Platform.OS === 'web') {
           window.alert(`Success\n\n${successMessage}`);
@@ -1632,6 +1631,74 @@ ${gymName}`;
     memberEmail: {
       fontSize: 14,
       color: theme.colors.textSecondary,
+    },
+    genderContainer: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    genderOption: {
+      flex: 1,
+      minWidth: '45%',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.background,
+      alignItems: 'center',
+    },
+    genderOptionSelected: {
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.colors.primary + '15',
+    },
+    genderOptionText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    genderOptionTextSelected: {
+      color: theme.colors.primary,
+      fontWeight: '700',
+    },
+    priceBreakdown: {
+      backgroundColor: theme.colors.background,
+      borderRadius: 12,
+      padding: 16,
+      marginVertical: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    breakdownRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    breakdownLabel: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+    },
+    breakdownValue: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    breakdownTotal: {
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+      paddingTop: 12,
+      marginTop: 8,
+    },
+    breakdownTotalLabel: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    breakdownTotalValue: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: theme.colors.primary,
     },
     memberPhone: {
       fontSize: 14,
@@ -3052,7 +3119,44 @@ ${gymName}`;
                   </Text>
                 </View>
 
-                <View style={styles.sectionDivider} />
+               {/* Gender Selection */}
+<View style={styles.inputGroup}>
+  <Text style={styles.inputLabel}>Gender *</Text>
+  <View style={styles.genderContainer}>
+    <TouchableOpacity
+      style={[
+        styles.genderOption,
+        selectedGender === 'male' && styles.genderOptionSelected,
+      ]}
+      onPress={() => setSelectedGender('male')}
+      activeOpacity={0.7}
+    >
+      <Text style={[
+        styles.genderOptionText,
+        selectedGender === 'male' && styles.genderOptionTextSelected,
+      ]}>
+        👨 Male
+      </Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+      style={[
+        styles.genderOption,
+        selectedGender === 'female' && styles.genderOptionSelected,
+      ]}
+      onPress={() => setSelectedGender('female')}
+      activeOpacity={0.7}
+    >
+      <Text style={[
+        styles.genderOptionText,
+        selectedGender === 'female' && styles.genderOptionTextSelected,
+      ]}>
+        👩 Female
+      </Text>
+    </TouchableOpacity>
+
+  </View>
+</View>
 
                 <View style={styles.sectionDivider} />
 
@@ -3232,117 +3336,178 @@ ${gymName}`;
                           </TouchableOpacity>
                         </View>
 
-                        {/* Cash & Online Payment Fields (Same for Both) */}
-                        {(paymentMethod === 'cash' || paymentMethod === 'online') && (
-                          <>
-                            <View style={styles.inputGroup}>
-                              <Text style={styles.inputLabel}>Plan Amount</Text>
-                              <TextInput
-                                style={[styles.input, styles.inputReadonly]}
-                                value={`₹${selectedSubscription.price}`}
-                                editable={false}
-                              />
-                            </View>
+                        {/* Payment Fields (Same for both Cash and Online) */}
+{(paymentMethod === 'cash' || paymentMethod === 'online') && (
+  <>
+    <View style={styles.inputGroup}>
+      <Text style={styles.inputLabel}>Plan Amount</Text>
+      <TextInput
+        style={[styles.input, styles.inputReadonly]}
+        value={`₹${selectedSubscription.price}`}
+        editable={false}
+      />
+    </View>
 
-                            <View style={styles.inputGroup}>
-                              <Text style={styles.inputLabel}>Amount Received *</Text>
-                              <TextInput
-                                style={styles.input}
-                                placeholder="Enter amount received"
-                                placeholderTextColor={theme.colors.textSecondary}
-                                value={amountReceived}
-                                onChangeText={setAmountReceived}
-                                keyboardType="decimal-pad"
-                              />
-                              <Text style={styles.helperText}>
-                                Enter the amount customer paid (can be partial)
-                              </Text>
-                            </View>
+    <View style={styles.inputGroup}>
+      <Text style={styles.inputLabel}>Admission Fee</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Enter admission fee"
+        placeholderTextColor={theme.colors.textSecondary}
+        value={admissionFee}
+        onChangeText={setAdmissionFee}
+        keyboardType="decimal-pad"
+      />
+      <Text style={styles.helperText}>
+        One-time admission/registration fee
+      </Text>
+    </View>
 
-                            <View style={styles.inputGroup}>
-                              <Text style={styles.inputLabel}>Pending Amount</Text>
-                              <TextInput
-                                style={[styles.input, styles.inputReadonly]}
-                                value={`₹${calculatePendingAmount()}`}
-                                editable={false}
-                              />
-                            </View>
+    <View style={styles.inputGroup}>
+      <Text style={styles.inputLabel}>Discount Amount (Optional)</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Enter discount amount"
+        placeholderTextColor={theme.colors.textSecondary}
+        value={discountAmount}
+        onChangeText={setDiscountAmount}
+        keyboardType="decimal-pad"
+      />
+      <Text style={styles.helperText}>
+        Enter discount amount to reduce from total
+      </Text>
+    </View>
 
-                            {/* Payment Summary Card */}
-                            <View style={styles.paymentSummary}>
-                              <View style={styles.paymentSummaryRow}>
-                                <Text style={styles.paymentSummaryLabel}>Plan Amount:</Text>
-                                <Text style={styles.paymentSummaryValue}>₹{selectedSubscription.price}</Text>
-                              </View>
-                              <View style={styles.paymentSummaryRow}>
-                                <Text style={styles.paymentSummaryLabel}>Amount Received:</Text>
-                                <Text style={styles.paymentSummaryValue}>
-                                  ₹{amountReceived ? parseFloat(amountReceived).toFixed(2) : '0.00'}
-                                </Text>
-                              </View>
-                              <View style={[styles.paymentSummaryRow, styles.paymentSummaryTotal]}>
-                                <Text style={styles.paymentSummaryTotalLabel}>Pending Amount:</Text>
-                                <View style={{ alignItems: 'flex-end', gap: 8 }}>
-                                  <Text style={styles.paymentSummaryTotalValue}>
-                                    ₹{calculatePendingAmount().toFixed(2)}
-                                  </Text>
-                                  <View style={[
-                                    styles.paymentStatusBadge,
-                                    calculatePendingAmount() === 0
-                                      ? styles.paymentStatusBadgeComplete
-                                      : styles.paymentStatusBadgePartial
-                                  ]}>
-                                    {calculatePendingAmount() === 0 ? (
-                                      <>
-                                        <CheckCircle size={14} color={theme.colors.success} />
-                                        <Text style={[styles.paymentStatusText, styles.paymentStatusTextComplete]}>
-                                          Fully Paid
-                                        </Text>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <AlertCircle size={14} color={theme.colors.warning} />
-                                        <Text style={[styles.paymentStatusText, styles.paymentStatusTextPartial]}>
-                                          Partial Payment
-                                        </Text>
-                                      </>
-                                    )}
-                                  </View>
-                                </View>
-                              </View>
-                            </View>
+    {/* Price Breakdown */}
+    <View style={styles.priceBreakdown}>
+      <View style={styles.breakdownRow}>
+        <Text style={styles.breakdownLabel}>Plan Price:</Text>
+        <Text style={styles.breakdownValue}>₹{selectedSubscription.price}</Text>
+      </View>
+      <View style={styles.breakdownRow}>
+        <Text style={styles.breakdownLabel}>Admission Fee:</Text>
+        <Text style={styles.breakdownValue}>+ ₹{admissionFee || '0'}</Text>
+      </View>
+      {discountAmount && parseFloat(discountAmount) > 0 && (
+        <View style={styles.breakdownRow}>
+          <Text style={[styles.breakdownLabel, { color: theme.colors.success }]}>
+            Discount:
+          </Text>
+          <Text style={[styles.breakdownValue, { color: theme.colors.success }]}>
+            - ₹{discountAmount}
+          </Text>
+        </View>
+      )}
+      <View style={[styles.breakdownRow, styles.breakdownTotal]}>
+        <Text style={styles.breakdownTotalLabel}>Final Amount:</Text>
+        <Text style={styles.breakdownTotalValue}>
+          ₹{calculateFinalAmount().toFixed(2)}
+        </Text>
+      </View>
+    </View>
 
-                            <View style={styles.inputGroup}>
-                              <Text style={styles.inputLabel}>Receipt Number (Optional)</Text>
-                              <TextInput
-                                style={styles.input}
-                                placeholder="Auto-generated if left blank"
-                                placeholderTextColor={theme.colors.textSecondary}
-                                value={receiptNumber}
-                                onChangeText={setReceiptNumber}
-                              />
-                            </View>
+    <View style={styles.inputGroup}>
+      <Text style={styles.inputLabel}>Amount Received *</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Enter amount received now"
+        placeholderTextColor={theme.colors.textSecondary}
+        value={amountReceived}
+        onChangeText={setAmountReceived}
+        keyboardType="decimal-pad"
+      />
+      <Text style={styles.helperText}>
+        Can be partial payment. Remaining will be tracked as pending.
+      </Text>
+    </View>
 
-                            <View style={styles.inputGroup}>
-                              <Text style={styles.inputLabel}>Payment Notes (Optional)</Text>
-                              <TextInput
-                                style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
-                                placeholder="Add any notes about this payment..."
-                                placeholderTextColor={theme.colors.textSecondary}
-                                value={paymentNotes}
-                                onChangeText={setPaymentNotes}
-                                multiline
-                                numberOfLines={3}
-                              />
-                            </View>
+    <View style={styles.inputGroup}>
+      <Text style={styles.inputLabel}>Remaining Amount</Text>
+      <TextInput
+        style={[styles.input, styles.inputReadonly]}
+        value={`₹${calculateRemainingAmount().toFixed(2)}`}
+        editable={false}
+      />
+    </View>
 
-                            {paymentMethod === 'online' && (
-                              <Text style={styles.helperText}>
-                                💡 Member paid online. Amount will be recorded for tracking.
-                              </Text>
-                            )}
-                          </>
-                        )}
+    {/* Payment Summary Card */}
+    <View style={styles.paymentSummary}>
+      <View style={styles.paymentSummaryRow}>
+        <Text style={styles.paymentSummaryLabel}>Final Amount:</Text>
+        <Text style={styles.paymentSummaryValue}>
+          ₹{calculateFinalAmount().toFixed(2)}
+        </Text>
+      </View>
+      <View style={styles.paymentSummaryRow}>
+        <Text style={styles.paymentSummaryLabel}>Amount Received:</Text>
+        <Text style={styles.paymentSummaryValue}>
+          ₹{amountReceived ? parseFloat(amountReceived).toFixed(2) : '0.00'}
+        </Text>
+      </View>
+      <View style={[styles.paymentSummaryRow, styles.paymentSummaryTotal]}>
+        <Text style={styles.paymentSummaryTotalLabel}>Pending Amount:</Text>
+        <View style={{ alignItems: 'flex-end', gap: 8 }}>
+          <Text style={styles.paymentSummaryTotalValue}>
+            ₹{calculateRemainingAmount().toFixed(2)}
+          </Text>
+          <View style={[
+            styles.paymentStatusBadge,
+            calculateRemainingAmount() === 0
+              ? styles.paymentStatusBadgeComplete
+              : styles.paymentStatusBadgePartial
+          ]}>
+            {calculateRemainingAmount() === 0 ? (
+              <>
+                <CheckCircle size={14} color={theme.colors.success} />
+                <Text style={[styles.paymentStatusText, styles.paymentStatusTextComplete]}>
+                  Fully Paid
+                </Text>
+              </>
+            ) : (
+              <>
+                <AlertCircle size={14} color={theme.colors.warning} />
+                <Text style={[styles.paymentStatusText, styles.paymentStatusTextPartial]}>
+                  Partial Payment
+                </Text>
+              </>
+            )}
+          </View>
+        </View>
+      </View>
+    </View>
+
+    {/* Rest of the payment fields (Receipt Number, Notes) remain the same */}
+    <View style={styles.inputGroup}>
+      <Text style={styles.inputLabel}>Receipt Number (Optional)</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Auto-generated if left blank"
+        placeholderTextColor={theme.colors.textSecondary}
+        value={receiptNumber}
+        onChangeText={setReceiptNumber}
+      />
+    </View>
+
+    <View style={styles.inputGroup}>
+      <Text style={styles.inputLabel}>Payment Notes (Optional)</Text>
+      <TextInput
+        style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
+        placeholder="Add any notes about this payment..."
+        placeholderTextColor={theme.colors.textSecondary}
+        value={paymentNotes}
+        onChangeText={setPaymentNotes}
+        multiline
+        numberOfLines={3}
+      />
+    </View>
+
+    {paymentMethod === 'online' && (
+      <Text style={styles.helperText}>
+        💡 Member paid online. Amount will be recorded for tracking.
+      </Text>
+    )}
+  </>
+)}
                       </>
                     )}
                   </>
@@ -3795,7 +3960,7 @@ ${gymName}`;
                         isLoading={updatingPhoto}
                         style={{ marginTop: 12 }}
                       />
-                      
+
 
                       {/* Attendance Calendar Button */}
                       <Button

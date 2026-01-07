@@ -13,6 +13,8 @@ import { AppDataProvider } from '@/contexts/AppDataContext';
 import { enableScreens } from 'react-native-screens';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AnimatedSplashScreen from '@/components/Splashscreen'; // ⭐ FIXED: Import directly
+import { NotificationProvider } from '@/contexts/NotificationContext';
+
 
 enableScreens(true);
 SplashScreen.preventAutoHideAsync();
@@ -157,11 +159,13 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <AuthProvider>
+      <NotificationProvider>
         <SubscriptionProvider>
           <AppDataProvider>
             <AppContent />
           </AppDataProvider>
         </SubscriptionProvider>
+      </NotificationProvider>
       </AuthProvider>
     </ThemeProvider>
   );

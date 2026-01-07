@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   View, Text, StyleSheet, ScrollView, TouchableOpacity, 
-  TextInput, Modal, Alert, RefreshControl, ActivityIndicator, Platform
+  TextInput, Modal, Alert, RefreshControl, ActivityIndicator, Platform,KeyboardAvoidingView
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -578,6 +578,11 @@ export default function SubscriptionsScreen() {
         presentationStyle="pageSheet"
         onRequestClose={resetForm}
       >
+         <KeyboardAvoidingView 
+    style={{ flex: 1 }} 
+    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+  >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>
@@ -659,6 +664,7 @@ export default function SubscriptionsScreen() {
             />
           </ScrollView>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
     </SafeAreaWrapper>

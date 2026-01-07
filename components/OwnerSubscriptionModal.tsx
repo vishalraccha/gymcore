@@ -451,9 +451,13 @@ export default function OwnerSubscriptionModal({
       paddingVertical: 16,
       borderRadius: 12,
       gap: 8,
+      marginBottom:30,
+      margin:5
     },
     purchaseButtonDisabled: {
       opacity: 0.5,
+      marginBottom:30,
+      margin:5
     },
     purchaseButtonText: {
       fontSize: 16,
@@ -489,6 +493,7 @@ export default function OwnerSubscriptionModal({
       animationType="slide"
       onRequestClose={onClose}
     >
+      
       <View style={styles.backdrop}>
         <View style={styles.modalContainer}>
           <View style={styles.header}>
