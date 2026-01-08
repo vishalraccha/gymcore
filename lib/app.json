@@ -69,7 +69,7 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./assets/images/splash-icon.png"
+      "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
       [

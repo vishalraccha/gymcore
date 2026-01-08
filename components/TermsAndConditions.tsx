@@ -10,7 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
-import { Check } from 'lucide-react-native';
+import { Check, ChevronDown, ChevronUp, FileText, Shield } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface TermsAndConditionsProps {
   onAccept: () => void;
@@ -406,57 +407,148 @@ BY CREATING AN ACCOUNT, ACCESSING, OR USING GYMCORE, YOU ACKNOWLEDGE THAT:
 export default function TermsAndConditions({ onAccept }: TermsAndConditionsProps) {
   const { theme } = useTheme();
   const [agreed, setAgreed] = useState(false);
-  const [scrollY] = useState(new Animated.Value(0));
+  const [expanded, setExpanded] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+
+  const toggleExpanded = () => {
+    Animated.timing(fadeAnim, {
+      toValue: 0,
+      duration: 150,
+      useNativeDriver: true,
+    }).start(() => {
+      setExpanded(!expanded);
+      scrollViewRef.current?.scrollTo({ y: 0, animated: false });
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 150,
+        useNativeDriver: true,
+      }).start();
+    });
+  };
 
   const styles = StyleSheet.create({
     container: {
       flex: 1,
       backgroundColor: theme.colors.background,
     },
-    header: {
-      padding: 20,
-      paddingTop: Platform.OS === 'ios' ? 60 : 20,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
+    gradientHeader: {
+      paddingTop: Platform.OS === 'ios' ? 60 : 40,
+      paddingBottom: 24,
+      paddingHorizontal: 20,
+    },
+    headerContent: {
+      alignItems: 'center',
+    },
+    iconContainer: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: theme.colors.primary + '20',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 16,
+      borderWidth: 2,
+      borderColor: theme.colors.primary + '30',
     },
     title: {
-      fontSize: 24,
-      fontWeight: '700',
+      fontSize: 28,
+      fontWeight: '800',
       color: theme.colors.text,
       marginBottom: 8,
+      textAlign: 'center',
     },
     subtitle: {
-      fontSize: 14,
+      fontSize: 15,
       color: theme.colors.textSecondary,
+      textAlign: 'center',
+      lineHeight: 22,
+    },
+    summaryCard: {
+      margin: 16,
+      marginTop: 8,
+      padding: 20,
+      backgroundColor: theme.colors.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.05,
+      shadowRadius: 8,
+      elevation: 3,
+    },
+    summaryTitle: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 12,
+    },
+    summaryItem: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginBottom: 10,
+    },
+    summaryBullet: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: theme.colors.primary,
+      marginTop: 7,
+      marginRight: 12,
+    },
+    summaryText: {
+      flex: 1,
+      fontSize: 14,
+      lineHeight: 22,
+      color: theme.colors.textSecondary,
+    },
+    toggleButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 16,
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      backgroundColor: theme.colors.background,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    toggleButtonText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.colors.primary,
+      marginRight: 8,
     },
     scrollView: {
       flex: 1,
     },
     content: {
       padding: 20,
+      paddingTop: 8,
     },
     section: {
       marginBottom: 24,
     },
     sectionTitle: {
-      fontSize: 18,
+      fontSize: 20,
       fontWeight: '700',
       color: theme.colors.text,
       marginBottom: 12,
-      marginTop: 8,
+      marginTop: 16,
+      letterSpacing: -0.5,
     },
     sectionSubtitle: {
-      fontSize: 16,
+      fontSize: 17,
       fontWeight: '600',
       color: theme.colors.text,
-      marginBottom: 8,
-      marginTop: 16,
+      marginBottom: 10,
+      marginTop: 14,
     },
     text: {
-      fontSize: 14,
-      lineHeight: 22,
+      fontSize: 15,
+      lineHeight: 24,
       color: theme.colors.textSecondary,
       marginBottom: 12,
     },
@@ -464,24 +556,65 @@ export default function TermsAndConditions({ onAccept }: TermsAndConditionsProps
       fontWeight: '700',
       color: theme.colors.text,
     },
+    bulletContainer: {
+      flexDirection: 'row',
+      marginBottom: 8,
+      paddingLeft: 8,
+    },
+    bulletPoint: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: theme.colors.primary,
+      marginTop: 9,
+      marginRight: 12,
+    },
+    bulletText: {
+      flex: 1,
+      fontSize: 15,
+      lineHeight: 24,
+      color: theme.colors.textSecondary,
+    },
+    warningBox: {
+      backgroundColor: theme.colors.primary + '10',
+      borderLeftWidth: 4,
+      borderLeftColor: theme.colors.primary,
+      padding: 16,
+      borderRadius: 12,
+      marginVertical: 12,
+    },
+    warningText: {
+      fontSize: 15,
+      lineHeight: 24,
+      color: theme.colors.text,
+      fontWeight: '600',
+    },
     checkboxContainer: {
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
+      margin: 16,
       padding: 20,
       backgroundColor: theme.colors.card,
-      borderTopWidth: 1,
-      borderTopColor: theme.colors.border,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: agreed ? theme.colors.primary : theme.colors.border,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.05,
+      shadowRadius: 8,
+      elevation: 3,
     },
     checkbox: {
-      width: 24,
-      height: 24,
-      borderRadius: 6,
+      width: 28,
+      height: 28,
+      borderRadius: 8,
       borderWidth: 2,
       borderColor: theme.colors.border,
-      marginRight: 12,
+      marginRight: 14,
+      marginTop: 2,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: theme.colors.card,
+      backgroundColor: theme.colors.background,
     },
     checkboxChecked: {
       backgroundColor: theme.colors.primary,
@@ -489,32 +622,45 @@ export default function TermsAndConditions({ onAccept }: TermsAndConditionsProps
     },
     checkboxLabel: {
       flex: 1,
-      fontSize: 14,
-      lineHeight: 20,
+      fontSize: 15,
+      lineHeight: 22,
       color: theme.colors.text,
+      fontWeight: '500',
     },
     buttonContainer: {
-      padding: 20,
-      paddingBottom: Platform.OS === 'ios' ? 30 : 20,
-      backgroundColor: theme.colors.card,
-      borderTopWidth: 1,
-      borderTopColor: theme.colors.border,
+      padding: 16,
+      paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+      backgroundColor: theme.colors.background,
     },
     button: {
       backgroundColor: theme.colors.primary,
-      paddingVertical: 16,
-      borderRadius: 12,
+      paddingVertical: 18,
+      borderRadius: 16,
       alignItems: 'center',
       justifyContent: 'center',
-      opacity: agreed ? 1 : 0.5,
+      shadowColor: theme.colors.primary,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 12,
+      elevation: 8,
     },
     buttonDisabled: {
       backgroundColor: theme.colors.border,
+      shadowOpacity: 0,
+      elevation: 0,
     },
     buttonText: {
-      fontSize: 16,
-      fontWeight: '600',
+      fontSize: 17,
+      fontWeight: '700',
       color: '#FFFFFF',
+      letterSpacing: 0.5,
+    },
+    lastUpdated: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      marginTop: 12,
+      fontWeight: '500',
     },
   });
 
@@ -522,57 +668,52 @@ export default function TermsAndConditions({ onAccept }: TermsAndConditionsProps
   const renderContent = () => {
     const lines = TERMS_CONTENT.split('\n');
     const elements: JSX.Element[] = [];
-    let currentSection = '';
-    let currentSubsection = '';
 
     lines.forEach((line, index) => {
       const trimmed = line.trim();
       
-      if (!trimmed) {
-        return;
-      }
+      if (!trimmed) return;
 
       if (trimmed.startsWith('# ')) {
-        // Main title
-        elements.push(
-          <Text key={index} style={[styles.sectionTitle, { fontSize: 20, marginTop: 0 }]}>
-            {trimmed.substring(2)}
-          </Text>
-        );
+        // Skip main title as it's in header
+        return;
       } else if (trimmed.startsWith('## ')) {
-        // Section title
-        currentSection = trimmed.substring(3);
         elements.push(
           <Text key={index} style={styles.sectionTitle}>
-            {currentSection}
+            {trimmed.substring(3)}
           </Text>
         );
       } else if (trimmed.startsWith('### ')) {
-        // Subsection title
-        currentSubsection = trimmed.substring(4);
         elements.push(
           <Text key={index} style={styles.sectionSubtitle}>
-            {currentSubsection}
+            {trimmed.substring(4)}
           </Text>
         );
       } else if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
-        // Bold text
         const text = trimmed.replace(/\*\*/g, '');
-        elements.push(
-          <Text key={index} style={[styles.text, styles.boldText]}>
-            {text}
-          </Text>
-        );
+        // Check if it's a warning/important text
+        if (text.includes('IMPORTANT') || text.includes('READ CAREFULLY')) {
+          elements.push(
+            <View key={index} style={styles.warningBox}>
+              <Text style={styles.warningText}>{text}</Text>
+            </View>
+          );
+        } else {
+          elements.push(
+            <Text key={index} style={[styles.text, styles.boldText]}>
+              {text}
+            </Text>
+          );
+        }
       } else if (trimmed.startsWith('- ')) {
-        // Bullet point
         const text = trimmed.substring(2);
         elements.push(
-          <Text key={index} style={styles.text}>
-            {'\u2022'} {text}
-          </Text>
+          <View key={index} style={styles.bulletContainer}>
+            <View style={styles.bulletPoint} />
+            <Text style={styles.bulletText}>{text}</Text>
+          </View>
         );
       } else {
-        // Regular text
         elements.push(
           <Text key={index} style={styles.text}>
             {trimmed}
@@ -581,15 +722,91 @@ export default function TermsAndConditions({ onAccept }: TermsAndConditionsProps
       }
     });
 
-    return <View style={styles.content}>{elements}</View>;
+    return <Animated.View style={[styles.content, { opacity: fadeAnim }]}>{elements}</Animated.View>;
   };
+
+  const renderSummary = () => (
+    <Animated.View style={[styles.summaryCard, { opacity: fadeAnim }]}>
+      <Text style={styles.summaryTitle}>📋 Key Highlights</Text>
+      
+      <View style={styles.summaryItem}>
+        <View style={styles.summaryBullet} />
+        <Text style={styles.summaryText}>
+          <Text style={styles.boldText}>Age Requirement:</Text> You must be 18+ or have parental consent
+        </Text>
+      </View>
+
+      <View style={styles.summaryItem}>
+        <View style={styles.summaryBullet} />
+        <Text style={styles.summaryText}>
+          <Text style={styles.boldText}>Account Security:</Text> You're responsible for keeping your credentials safe
+        </Text>
+      </View>
+
+      <View style={styles.summaryItem}>
+        <View style={styles.summaryBullet} />
+        <Text style={styles.summaryText}>
+          <Text style={styles.boldText}>Health Disclaimer:</Text> This app is not a substitute for professional medical advice
+        </Text>
+      </View>
+
+      <View style={styles.summaryItem}>
+        <View style={styles.summaryBullet} />
+        <Text style={styles.summaryText}>
+          <Text style={styles.boldText}>Data Privacy:</Text> Your gym owner and trainers can access your workout data
+        </Text>
+      </View>
+
+      <View style={styles.summaryItem}>
+        <View style={styles.summaryBullet} />
+        <Text style={styles.summaryText}>
+          <Text style={styles.boldText}>Payments:</Text> Subscriptions auto-renew; refunds available within 7 days
+        </Text>
+      </View>
+
+      <View style={styles.summaryItem}>
+        <View style={styles.summaryBullet} />
+        <Text style={styles.summaryText}>
+          <Text style={styles.boldText}>Governing Law:</Text> These terms are governed by Indian laws
+        </Text>
+      </View>
+
+      <TouchableOpacity 
+        style={styles.toggleButton} 
+        onPress={toggleExpanded}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.toggleButtonText}>
+          {expanded ? 'Show Less' : 'Read Full Terms'}
+        </Text>
+        {expanded ? (
+          <ChevronUp size={20} color={theme.colors.primary} />
+        ) : (
+          <ChevronDown size={20} color={theme.colors.primary} />
+        )}
+      </TouchableOpacity>
+
+      <Text style={styles.lastUpdated}>Last Updated: January 5, 2026</Text>
+    </Animated.View>
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Terms and Conditions</Text>
-        <Text style={styles.subtitle}>Please read and accept to continue</Text>
-      </View>
+      {/* Gradient Header */}
+      <LinearGradient
+        colors={[theme.colors.primary + '15', theme.colors.background]}
+        style={styles.gradientHeader}
+      >
+        <View style={styles.headerContent}>
+          <View style={styles.iconContainer}>
+            <FileText size={32} color={theme.colors.primary} strokeWidth={2.5} />
+          </View>
+          <Text style={styles.title}>Terms & Conditions</Text>
+          <Text style={styles.subtitle}>
+            Please review our terms before continuing
+          </Text>
+        </View>
+      </LinearGradient>
 
       <ScrollView
         ref={scrollViewRef}
@@ -597,22 +814,24 @@ export default function TermsAndConditions({ onAccept }: TermsAndConditionsProps
         contentContainerStyle={{ paddingBottom: 20 }}
         showsVerticalScrollIndicator={true}
       >
-        {renderContent()}
+        {expanded ? renderContent() : renderSummary()}
       </ScrollView>
 
-      <View style={styles.checkboxContainer}>
-        <TouchableOpacity
-          style={[styles.checkbox, agreed && styles.checkboxChecked]}
-          onPress={() => setAgreed(!agreed)}
-          activeOpacity={0.7}
-        >
-          {agreed && <Check size={16} color="#FFFFFF" />}
-        </TouchableOpacity>
+      {/* Checkbox Agreement */}
+      <TouchableOpacity
+        style={styles.checkboxContainer}
+        onPress={() => setAgreed(!agreed)}
+        activeOpacity={0.8}
+      >
+        <View style={[styles.checkbox, agreed && styles.checkboxChecked]}>
+          {agreed && <Check size={18} color="#FFFFFF" strokeWidth={3} />}
+        </View>
         <Text style={styles.checkboxLabel}>
           I have read and agree to the Terms and Conditions and Privacy Policy
         </Text>
-      </View>
+      </TouchableOpacity>
 
+      {/* Accept Button */}
       <View style={styles.buttonContainer}>
         <TouchableOpacity
           style={[styles.button, !agreed && styles.buttonDisabled]}
@@ -620,10 +839,11 @@ export default function TermsAndConditions({ onAccept }: TermsAndConditionsProps
           disabled={!agreed}
           activeOpacity={0.8}
         >
-          <Text style={styles.buttonText}>I Agree</Text>
+          <Text style={styles.buttonText}>
+            {agreed ? 'Continue to GymCore' : 'Please Accept Terms'}
+          </Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
 }
-

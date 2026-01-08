@@ -12,6 +12,8 @@ import {
   Platform,
   Animated,
   Linking,
+  ActivityIndicator,
+  KeyboardAvoidingView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -25,7 +27,7 @@ import InvoicesList from "@/components/InvoicesList";
 import { getUserInvoices } from "@/lib/invoice";
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
-import { uploadMemberPhoto, createBlobFromUri } from '@/lib/storage';
+import { uploadMemberPhoto } from '@/lib/storage';
 import * as ImageManipulator from 'expo-image-manipulator';
 import {
   Plus,
@@ -45,6 +47,7 @@ import {
   AlertCircle,
   Calendar,
   TrendingUp,
+  Users
 } from 'lucide-react-native';
 
 import { formatRupees } from '@/lib/currency';
@@ -122,6 +125,9 @@ export default function MembersScreen() {
     height: '',
     batch: 'morning',
     profile_photo_uri: '',
+    member_id: '',
+    notes: '',
+    joining_date: new Date().toISOString().split('T')[0],
   });
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [updatingPhoto, setUpdatingPhoto] = useState(false);
@@ -149,8 +155,9 @@ export default function MembersScreen() {
   const [memberAttendance, setMemberAttendance] = useState<any[]>([]);
   const [showPassword, setShowPassword] = useState(false);
   const [admissionFee, setAdmissionFee] = useState('50');
-const [discountAmount, setDiscountAmount] = useState('');
-const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other' | 'prefer_not_to_say'>('male');
+  const [discountAmount, setDiscountAmount] = useState('');
+  const [selectedGender, setSelectedGender] = useState<'male' | 'female'>('male');
+  const [showJoiningDatePicker, setShowJoiningDatePicker] = useState(false);
 
   // const [isCreatingMember, setIsCreatingMember] = useState(false);
 
@@ -186,8 +193,8 @@ const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other'
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsEditing: true,
                 aspect: [1, 1],
-                quality: 0.7, // ⭐ Reduced for faster upload
-                base64: false, // ⭐ Don't need base64
+                quality: 0.7,
+                base64: false,
               });
 
               if (!result.canceled && result.assets[0]) {
@@ -207,7 +214,7 @@ const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other'
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsEditing: true,
                 aspect: [1, 1],
-                quality: 0.7, // ⭐ Reduced for faster upload
+                quality: 0.7,
                 base64: false,
               });
 
@@ -228,7 +235,7 @@ const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other'
     }
   };
 
-  // ⭐ ANDROID FIXED: Use uploadMemberPhoto from storage lib
+  // ⭐ For creating new members (WORKS ✅)
   const uploadProfilePhoto = async (
     userId: string,
     photoUri: string
@@ -236,7 +243,7 @@ const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other'
     try {
       console.log('📸 Uploading profile photo for:', userId);
 
-      // ✅ JUST CALL STORAGE FUNCTION
+      // ✅ Upload to storage
       const photoUrl = await uploadMemberPhoto(photoUri, userId);
 
       // ✅ Update DB
@@ -256,12 +263,10 @@ const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other'
     }
   };
 
-
-  // ⭐ For updating existing member photos with detailed logs
+  // ⭐ FIXED: Update existing member photo with cache busting
   const updateMemberPhoto = async (memberId: string) => {
     try {
-      const { status } =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (status !== 'granted') {
         Alert.alert('Permission needed', 'Please grant photo permission');
@@ -279,26 +284,79 @@ const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other'
 
       setUpdatingPhoto(true);
 
-      const photoUrl = await uploadProfilePhoto(
-        memberId,
-        result.assets[0].uri
-      );
+      console.log('📸 Updating photo for member:', memberId);
+      console.log('📸 Image URI:', result.assets[0].uri);
 
-      if (selectedMember) {
-        setSelectedMember({
-          ...selectedMember,
-          profile_photo_url: photoUrl,
-        });
+      try {
+        // ✅ Step 1: Upload photo to storage (upsert overwrites old file)
+        const photoUrl = await uploadMemberPhoto(result.assets[0].uri, memberId);
+        console.log('✅ Photo uploaded, URL:', photoUrl);
+
+        // ✅ Step 2: Add cache-busting timestamp to URL
+        const cacheBustedUrl = `${photoUrl}?t=${Date.now()}`;
+        console.log('✅ Cache-busted URL:', cacheBustedUrl);
+
+        // ✅ Step 3: Update database with cache-busted URL
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({
+            profile_photo_url: cacheBustedUrl,
+            updated_at: new Date().toISOString() // Force profile update
+          })
+          .eq('id', memberId);
+
+        if (updateError) {
+          console.error('❌ DB update error:', updateError);
+          throw new Error('Failed to update profile photo in database');
+        }
+
+        console.log('✅ Database updated successfully');
+
+        // ✅ Step 4: Update local state with cache-busted URL
+        if (selectedMember) {
+          setSelectedMember({
+            ...selectedMember,
+            profile_photo_url: cacheBustedUrl,
+          });
+        }
+
+        // ✅ Step 5: Refresh member list
+        await fetchMembers();
+
+        Alert.alert('Success', 'Profile photo updated successfully');
+
+      } catch (uploadError: any) {
+        console.error('❌ Update failed:', uploadError);
+        throw uploadError;
       }
 
-      await fetchMembers();
-      Alert.alert('Success', 'Profile photo updated successfully');
-
     } catch (error: any) {
-      console.error('❌ Update failed:', error);
-      Alert.alert('Error', error?.message || 'Failed to update photo');
+      console.error('❌ Update process failed:', error);
+      Alert.alert(
+        'Error',
+        error?.message || 'Failed to update photo. Please try again.'
+      );
     } finally {
       setUpdatingPhoto(false);
+    }
+  };
+
+  // Generate unique member ID
+  const generateMemberId = async (gymId: string | null) => {
+    try {
+      if (!gymId) return `MEM-${Date.now()}`;
+
+      // Get count of members in this gym
+      const { count } = await supabase
+        .from('profiles')
+        .select('*', { count: 'exact', head: true })
+        .eq('gym_id', gymId)
+        .eq('role', 'member');
+
+      const nextNumber = (count || 0) + 1;
+      return `MEM-${String(nextNumber).padStart(4, '0')}`;
+    } catch (error) {
+      return `MEM-${Date.now()}`;
     }
   };
 
@@ -352,17 +410,17 @@ const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other'
 
   const calculateFinalAmount = () => {
     if (!selectedSubscription) return 0;
-    
+
     const planPrice = selectedSubscription.price || 0;
     const admission = parseFloat(admissionFee) || 0;
     const discount = parseFloat(discountAmount) || 0;
-    
+
     const subtotal = planPrice + admission;
     const total = subtotal - discount;
-    
+
     return Math.max(0, total);
   };
-  
+
   // Add this helper function to calculate remaining after amount received
   const calculateRemainingAmount = () => {
     const finalAmount = calculateFinalAmount();
@@ -704,7 +762,7 @@ const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other'
         }
         return;
       }
-      if (parseFloat(amountReceived) > selectedSubscription.price) {
+      if (parseFloat(amountReceived) > selectedSubscription.price + parseFloat(admissionFee)) {
         if (Platform.OS === 'web') {
           window.alert('Amount received cannot exceed plan price');
         } else {
@@ -753,12 +811,15 @@ const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other'
 
       const profileUpdates: any = {
         gym_id: profile?.gym_id,
-        phone: newMember.phone, // ⭐ CRITICAL: Set phone explicitly
+        phone: newMember.phone,
         weight: newMember.weight ? parseFloat(newMember.weight) : null,
         height: newMember.height ? parseFloat(newMember.height) : null,
         batch: newMember.batch,
         has_personal_training: newMember.has_personal_training,
-        gender: selectedGender, 
+        gender: selectedGender,
+        member_id: newMember.member_id,
+        notes: newMember.notes || null,
+        joining_date: newMember.joining_date,
       };
 
       const { error: profileUpdateError } = await supabase
@@ -829,9 +890,9 @@ const [selectedGender, setSelectedGender] = useState<'male' | 'female' | 'other'
       if ((paymentMethod === 'cash' || paymentMethod === 'online') && selectedSubscription) {
         try {
           const finalAmount = calculateFinalAmount();
-const received = parseFloat(amountReceived);
-const pending = Math.max(0, finalAmount - received);
-const paymentStatus = pending === 0 ? 'completed' : 'partial';
+          const received = parseFloat(amountReceived);
+          const pending = Math.max(0, finalAmount - received);
+          const paymentStatus = pending === 0 ? 'completed' : 'partial';
           const startDateParts = customStartDate.split('-');
           const startDate = new Date(
             parseInt(startDateParts[0]),
@@ -842,7 +903,7 @@ const paymentStatus = pending === 0 ? 'completed' : 'partial';
 
           const endDate = new Date(startDate);
           endDate.setDate(endDate.getDate() + (selectedSubscription.duration_days || selectedSubscription.duration_months * 30));
-          
+
           const { data: userSub, error: subError } = await supabase
             .from('user_subscriptions')
             .insert([{
@@ -936,10 +997,13 @@ const paymentStatus = pending === 0 ? 'completed' : 'partial';
         height: '',
         batch: 'morning',
         profile_photo_uri: '',
+        member_id: '',
+        notes: '',
+        joining_date: new Date().toISOString().split('T')[0],
       });
       setSelectedGender('male'); // ⭐ ADD THIS
-setAdmissionFee('50'); // ⭐ ADD THIS
-setDiscountAmount('');
+      setAdmissionFee('50'); // ⭐ ADD THIS
+      setDiscountAmount('');
       setSelectedSubscription(null);
       setPaymentMethod('none');
       setAmountReceived('');
@@ -1214,19 +1278,29 @@ setDiscountAmount('');
     }
 
     const received = parseFloat(renewAmountReceived);
-    if (received > renewSubscription.price) {
-      Alert.alert('Error', 'Amount received cannot exceed plan price');
+    const discount = parseFloat(discountAmount) || 0;
+    const finalAmount = Math.max(0, renewSubscription.price - discount);
+
+    if (received > finalAmount) {
+      Alert.alert('Error', `Amount received cannot exceed final amount of ${formatRupees(finalAmount)}`);
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const startDate = new Date();
-      const endDate = new Date();
+      const startDateParts = customStartDate.split('-');
+      const startDate = new Date(
+        parseInt(startDateParts[0]),
+        parseInt(startDateParts[1]) - 1,
+        parseInt(startDateParts[2]),
+        12, 0, 0
+      );
+
+      const endDate = new Date(startDate);
       endDate.setDate(endDate.getDate() + (renewSubscription.duration_days || renewSubscription.duration_months * 30));
 
-      const pending = Math.max(0, renewSubscription.price - received);
+      const pending = Math.max(0, finalAmount - received);
       const paymentStatus = pending === 0 ? 'completed' : 'partial';
 
       // Create new subscription
@@ -1237,13 +1311,14 @@ setDiscountAmount('');
           subscription_id: renewSubscription.id,
           start_date: customStartDate,
           end_date: endDate.toISOString().split('T')[0],
-          total_amount: renewSubscription.price,
+          total_amount: finalAmount,  // ⭐ Changed
+          discount_amount: discount,   // ⭐ Added
           paid_amount: received,
-          amount_paid: received, // Keep both in sync
+          amount_paid: received,
           pending_amount: pending,
           payment_status: paymentStatus,
           payment_method: renewPaymentMethod,
-          is_active: true, // Only active if fully paid
+          is_active: true,
           currency: 'INR',
           gym_id: profile?.gym_id,
           created_by: profile?.id,
@@ -2843,7 +2918,15 @@ ${gymName}`;
           )}
         </ScrollView>
 
-        <TouchableOpacity style={styles.fab} onPress={() => setShowAddMember(true)} activeOpacity={0.8}>
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={async () => {
+            const autoMemberId = await generateMemberId(profile?.gym_id || null);
+            setNewMember(prev => ({ ...prev, member_id: autoMemberId }));
+            setShowAddMember(true);
+          }}
+          activeOpacity={0.8}
+        >
           <Plus size={24} color="#FFFFFF" />
         </TouchableOpacity>
 
@@ -2853,679 +2936,790 @@ ${gymName}`;
           presentationStyle="pageSheet"
           onRequestClose={() => setShowAddMember(false)}
         >
-          <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          >
+            <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
 
-                <Text style={styles.modalTitle}>Add New Member</Text>
-                <TouchableOpacity onPress={() => setShowAddMember(false)} style={styles.closeButton}>
-                  <X size={24} color={theme.colors.text} />
-                </TouchableOpacity>
-              </View>
-
-              <ScrollView
-                style={styles.modalScrollView}
-                contentContainerStyle={styles.modalContent}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-              >
-                {/* Personal Information */}
-                {/* After Phone Input */}
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Profile Photo (Optional)</Text>
-
-                  {newMember.profile_photo_uri ? (
-                    <View style={{ alignItems: 'center', gap: 12 }}>
-                      <Image
-                        source={{ uri: newMember.profile_photo_uri }}
-                        style={{
-                          width: 120,
-                          height: 120,
-                          borderRadius: 60,
-                          borderWidth: 3,
-                          borderColor: theme.colors.primary,
-                        }}
-                      />
-                      <View style={{ flexDirection: 'row', gap: 12 }}>
-                        <Button
-                          title="Change Photo"
-                          onPress={pickImage}
-                          variant="outline"
-                          style={{ flex: 1 }}
-                        />
-                        <Button
-                          title="Remove"
-                          onPress={() => setNewMember({ ...newMember, profile_photo_uri: '' })}
-                          variant="outline"
-                          style={{ flex: 1, borderColor: theme.colors.error }}
-                          textStyle={{ color: theme.colors.error }}
-                        />
-                      </View>
-                    </View>
-                  ) : (
-                    <TouchableOpacity
-                      style={{
-                        borderWidth: 2,
-                        borderColor: theme.colors.border,
-                        borderStyle: 'dashed',
-                        borderRadius: 12,
-                        padding: 32,
-                        alignItems: 'center',
-                        backgroundColor: theme.colors.background,
-                      }}
-                      onPress={pickImage}
-                      activeOpacity={0.7}
-                    >
-                      <User size={48} color={theme.colors.textSecondary} />
-                      <Text style={[styles.inputLabel, { marginTop: 12, marginBottom: 4 }]}>
-                        Upload Photo
-                      </Text>
-                      <Text style={styles.helperText}>
-                        Tap to take photo or choose from gallery
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Full Name *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter full name"
-                    placeholderTextColor={theme.colors.textSecondary}
-                    value={newMember.full_name}
-                    onChangeText={(text) => setNewMember({ ...newMember, full_name: text })}
-                  />
+                  <Text style={styles.modalTitle}>Add New Member</Text>
+                  <TouchableOpacity onPress={() => setShowAddMember(false)} style={styles.closeButton}>
+                    <X size={24} color={theme.colors.text} />
+                  </TouchableOpacity>
                 </View>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Email *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter email address"
-                    placeholderTextColor={theme.colors.textSecondary}
-                    value={newMember.email}
-                    onChangeText={(text) => setNewMember({ ...newMember, email: text })}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                  />
-                </View>
+                <ScrollView
+                  style={styles.modalScrollView}
+                  contentContainerStyle={styles.modalContent}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {/* Personal Information */}
+                  {/* After Phone Input */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Profile Photo (Optional)</Text>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Phone *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter phone number "
-                    placeholderTextColor={theme.colors.textSecondary}
-                    value={newMember.phone}
-                    onChangeText={(text) => setNewMember({ ...newMember, phone: text })}
-                    keyboardType="phone-pad"
-
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Password *</Text>
-                  <View style={styles.passwordContainer}>
-                    <TextInput
-                      style={[styles.input, styles.passwordInput]}
-                      placeholder="Min 6 characters"
-                      placeholderTextColor={theme.colors.textSecondary}
-                      value={newMember.password}
-                      onChangeText={(text) => setNewMember({ ...newMember, password: text })}
-                      secureTextEntry={!showPassword}
-                    />
-                    <TouchableOpacity
-                      style={styles.eyeIcon}
-                      onPress={() => setShowPassword(!showPassword)}
-                    >
-                      <Ionicons
-                        name={showPassword ? "eye-off-outline" : "eye-outline"}
-                        size={24}
-                        color={theme.colors.textSecondary}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                  <Text style={styles.helperText}>
-                    Member will use this email and password to login.
-                  </Text>
-
-                </View>
-
-                {/* Personal Training Toggle */}
-                <View style={styles.inputGroup}>
-                  <View style={styles.toggleContainer}>
-                    <View>
-                      <Text style={styles.toggleLabel}>Personal Training</Text>
-                      <Text style={styles.helperText}>
-                        Enable custom diet plans for this member
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={[
-                        styles.toggleSwitch,
-                        newMember.has_personal_training && styles.toggleSwitchActive,
-                      ]}
-                      onPress={() => setNewMember({ ...newMember, has_personal_training: !newMember.has_personal_training })}
-                    >
-                      <View
-                        style={[
-                          styles.toggleThumb,
-                          newMember.has_personal_training && styles.toggleThumbActive,
-                        ]}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Weight and Height (Optional) */}
-                <View style={styles.inputRow}>
-                  <View style={styles.inputHalf}>
-                    <Text style={styles.inputLabel}>Weight (kg)</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="e.g., 70"
-                      placeholderTextColor={theme.colors.textSecondary}
-                      value={newMember.weight}
-                      onChangeText={(text) => setNewMember({ ...newMember, weight: text })}
-                      keyboardType="decimal-pad"
-                    />
-                  </View>
-
-                  <View style={styles.inputHalf}>
-                    <Text style={styles.inputLabel}>Height (cm)</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="e.g., 175"
-                      placeholderTextColor={theme.colors.textSecondary}
-                      value={newMember.height}
-                      onChangeText={(text) => setNewMember({ ...newMember, height: text })}
-                      keyboardType="decimal-pad"
-                    />
-                  </View>
-                </View>
-                {/* Batch Selection */}
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Training Batch *</Text>
-                  <View style={styles.batchDropdown}>
-                    <TouchableOpacity
-                      style={[
-                        styles.batchOption,
-                        newMember.batch === 'morning' && styles.batchOptionSelected,
-                      ]}
-                      onPress={() => setNewMember({ ...newMember, batch: 'morning' })}
-                      activeOpacity={0.7}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Text style={{ fontSize: 20 }}>🌅</Text>
-                        <Text style={[
-                          styles.batchOptionText,
-                          newMember.batch === 'morning' && styles.batchOptionTextSelected,
-                        ]}>
-                          Morning
-                        </Text>
-                      </View>
-                      {newMember.batch === 'morning' && (
-                        <CheckCircle size={20} color={theme.colors.primary} />
-                      )}
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.batchOption,
-                        newMember.batch === 'evening' && styles.batchOptionSelected,
-                      ]}
-                      onPress={() => setNewMember({ ...newMember, batch: 'evening' })}
-                      activeOpacity={0.7}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Text style={{ fontSize: 20 }}>🌆</Text>
-                        <Text style={[
-                          styles.batchOptionText,
-                          newMember.batch === 'evening' && styles.batchOptionTextSelected,
-                        ]}>
-                          Evening
-                        </Text>
-                      </View>
-                      {newMember.batch === 'evening' && (
-                        <CheckCircle size={20} color={theme.colors.primary} />
-                      )}
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.batchOption,
-                        styles.batchOptionLast,
-                        newMember.batch === 'night' && styles.batchOptionSelected,
-                      ]}
-                      onPress={() => setNewMember({ ...newMember, batch: 'night' })}
-                      activeOpacity={0.7}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Text style={{ fontSize: 20 }}>🌙</Text>
-                        <Text style={[
-                          styles.batchOptionText,
-                          newMember.batch === 'night' && styles.batchOptionTextSelected,
-                        ]}>
-                          Night
-                        </Text>
-                      </View>
-                      {newMember.batch === 'night' && (
-                        <CheckCircle size={20} color={theme.colors.primary} />
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                  <Text style={styles.helperText}>
-                    Select the training batch for this member
-                  </Text>
-                </View>
-
-               {/* Gender Selection */}
-<View style={styles.inputGroup}>
-  <Text style={styles.inputLabel}>Gender *</Text>
-  <View style={styles.genderContainer}>
-    <TouchableOpacity
-      style={[
-        styles.genderOption,
-        selectedGender === 'male' && styles.genderOptionSelected,
-      ]}
-      onPress={() => setSelectedGender('male')}
-      activeOpacity={0.7}
-    >
-      <Text style={[
-        styles.genderOptionText,
-        selectedGender === 'male' && styles.genderOptionTextSelected,
-      ]}>
-        👨 Male
-      </Text>
-    </TouchableOpacity>
-
-    <TouchableOpacity
-      style={[
-        styles.genderOption,
-        selectedGender === 'female' && styles.genderOptionSelected,
-      ]}
-      onPress={() => setSelectedGender('female')}
-      activeOpacity={0.7}
-    >
-      <Text style={[
-        styles.genderOptionText,
-        selectedGender === 'female' && styles.genderOptionTextSelected,
-      ]}>
-        👩 Female
-      </Text>
-    </TouchableOpacity>
-
-  </View>
-</View>
-
-                <View style={styles.sectionDivider} />
-
-                {/* Subscription Section */}
-                <Text style={styles.sectionTitle}>Subscription (Optional)</Text>
-                <Text style={styles.helperText}>
-                  Add a subscription plan with payment details or skip for later.
-                </Text>
-
-                {availableSubscriptions.length > 0 ? (
-                  <>
-                    <Text style={styles.inputLabel}>Select Plan</Text>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.subscriptionScroll}
-                    >
-                      {availableSubscriptions.map((sub) => (
-                        <TouchableOpacity
-                          key={sub.id}
-                          style={[
-                            styles.subscriptionOption,
-                            selectedSubscription?.id === sub.id && styles.subscriptionOptionSelected,
-                          ]}
-                          onPress={() => {
-                            setSelectedSubscription(sub);
-                            if (paymentMethod === 'none') {
-                              setPaymentMethod('cash');
-                            }
-                            setAmountReceived('');
+                    {newMember.profile_photo_uri ? (
+                      <View style={{ alignItems: 'center', gap: 12 }}>
+                        <Image
+                          source={{ uri: newMember.profile_photo_uri }}
+                          style={{
+                            width: 120,
+                            height: 120,
+                            borderRadius: 60,
+                            borderWidth: 3,
+                            borderColor: theme.colors.primary,
                           }}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[
-                            styles.subscriptionName,
-                            selectedSubscription?.id === sub.id && styles.subscriptionNameSelected,
-                          ]}>
-                            {sub.name}
-                          </Text>
-                          <Text style={[
-                            styles.subscriptionPrice,
-                            selectedSubscription?.id === sub.id && styles.subscriptionPriceSelected,
-                          ]}>
-                            ₹{sub.price}
-                          </Text>
-                          <Text style={[
-                            styles.subscriptionDuration,
-                            selectedSubscription?.id === sub.id && styles.subscriptionDurationSelected,
-                          ]}>
-                            {sub.duration_months} month{sub.duration_months > 1 ? 's' : ''}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                    {/* Custom Start Date with DatePicker */}
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.inputLabel}>Subscription Start Date</Text>
-
+                        />
+                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                          <Button
+                            title="Change Photo"
+                            onPress={pickImage}
+                            variant="outline"
+                            style={{ flex: 1 }}
+                          />
+                          <Button
+                            title="Remove"
+                            onPress={() => setNewMember({ ...newMember, profile_photo_uri: '' })}
+                            variant="outline"
+                            style={{ flex: 1, borderColor: theme.colors.error }}
+                            textStyle={{ color: theme.colors.error }}
+                          />
+                        </View>
+                      </View>
+                    ) : (
                       <TouchableOpacity
-                        style={[styles.input, styles.datePickerButton]}
-                        onPress={() => setShowDatePicker(true)}
+                        style={{
+                          borderWidth: 2,
+                          borderColor: theme.colors.border,
+                          borderStyle: 'dashed',
+                          borderRadius: 12,
+                          padding: 32,
+                          alignItems: 'center',
+                          backgroundColor: theme.colors.background,
+                        }}
+                        onPress={pickImage}
                         activeOpacity={0.7}
                       >
-                        <View style={styles.datePickerContent}>
-                          <Calendar size={20} color={theme.colors.textSecondary} />
-                          <Text style={styles.datePickerText}>
-                            {new Date(customStartDate + 'T12:00:00').toLocaleDateString('en-IN', {
-                              day: '2-digit',
-                              month: 'short',
-                              year: 'numeric'
-                            })}
+                        <User size={48} color={theme.colors.textSecondary} />
+                        <Text style={[styles.inputLabel, { marginTop: 12, marginBottom: 4 }]}>
+                          Upload Photo
+                        </Text>
+                        <Text style={styles.helperText}>
+                          Tap to take photo or choose from gallery
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Member ID *</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Auto-generated or enter custom ID"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={newMember.member_id}
+                      onChangeText={(text) => setNewMember({ ...newMember, member_id: text })}
+                    />
+                    <Text style={styles.helperText}>
+                      Unique identifier for this member. Leave blank for auto-generation.
+                    </Text>
+                  </View>
+
+                  {/* Joining Date Field */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Joining Date *</Text>
+                    <TouchableOpacity
+                      style={[styles.input, styles.datePickerButton]}
+                      onPress={() => setShowJoiningDatePicker(true)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.datePickerContent}>
+                        <Calendar size={20} color={theme.colors.textSecondary} />
+                        <Text style={styles.datePickerText}>
+                          {new Date(newMember.joining_date + 'T12:00:00').toLocaleDateString('en-IN', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric'
+                          })}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    {showJoiningDatePicker && (
+                      <>
+                        {Platform.OS === 'web' ? (
+                          <input
+                            type="date"
+                            value={newMember.joining_date}
+                            onChange={(e) => {
+                              setNewMember({ ...newMember, joining_date: e.target.value });
+                              setShowJoiningDatePicker(false);
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: 16,
+                              fontSize: 16,
+                              borderRadius: 12,
+                              border: `1.5px solid ${theme.colors.border}`,
+                              backgroundColor: theme.colors.card,
+                              color: theme.colors.text,
+                              marginBottom: 16,
+                            }}
+                          />
+                        ) : (
+                          <DateTimePicker
+                            value={new Date(newMember.joining_date + 'T12:00:00')}
+                            mode="date"
+                            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                            onChange={(event, selectedDate) => {
+                              setShowJoiningDatePicker(Platform.OS === 'ios');
+                              if (selectedDate) {
+                                const year = selectedDate.getFullYear();
+                                const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                                const day = String(selectedDate.getDate()).padStart(2, '0');
+                                setNewMember({ ...newMember, joining_date: `${year}-${month}-${day}` });
+                              }
+                            }}
+                          />
+                        )}
+                      </>
+                    )}
+                  </View>
+
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Full Name *</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter full name"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={newMember.full_name}
+                      onChangeText={(text) => setNewMember({ ...newMember, full_name: text })}
+                    />
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Email *</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter email address"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={newMember.email}
+                      onChangeText={(text) => setNewMember({ ...newMember, email: text })}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                    />
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Phone *</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter phone number "
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={newMember.phone}
+                      onChangeText={(text) => setNewMember({ ...newMember, phone: text })}
+                      keyboardType="phone-pad"
+
+                    />
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Password *</Text>
+                    <View style={styles.passwordContainer}>
+                      <TextInput
+                        style={[styles.input, styles.passwordInput]}
+                        placeholder="Min 6 characters"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={newMember.password}
+                        onChangeText={(text) => setNewMember({ ...newMember, password: text })}
+                        secureTextEntry={!showPassword}
+                      />
+                      <TouchableOpacity
+                        style={styles.eyeIcon}
+                        onPress={() => setShowPassword(!showPassword)}
+                      >
+                        <Ionicons
+                          name={showPassword ? "eye-off-outline" : "eye-outline"}
+                          size={24}
+                          color={theme.colors.textSecondary}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.helperText}>
+                      Member will use this email and password to login.
+                    </Text>
+
+                  </View>
+
+                  {/* Personal Training Toggle */}
+                  <View style={styles.inputGroup}>
+                    <View style={styles.toggleContainer}>
+                      <View>
+                        <Text style={styles.toggleLabel}>Personal Training</Text>
+                        <Text style={styles.helperText}>
+                          Enable custom diet plans for this member
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[
+                          styles.toggleSwitch,
+                          newMember.has_personal_training && styles.toggleSwitchActive,
+                        ]}
+                        onPress={() => setNewMember({ ...newMember, has_personal_training: !newMember.has_personal_training })}
+                      >
+                        <View
+                          style={[
+                            styles.toggleThumb,
+                            newMember.has_personal_training && styles.toggleThumbActive,
+                          ]}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Weight and Height (Optional) */}
+                  <View style={styles.inputRow}>
+                    <View style={styles.inputHalf}>
+                      <Text style={styles.inputLabel}>Weight (kg)</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="e.g., 70"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={newMember.weight}
+                        onChangeText={(text) => setNewMember({ ...newMember, weight: text })}
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+
+                    <View style={styles.inputHalf}>
+                      <Text style={styles.inputLabel}>Height (cm)</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="e.g., 175"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={newMember.height}
+                        onChangeText={(text) => setNewMember({ ...newMember, height: text })}
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                  </View>
+                  {/* Batch Selection */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Training Batch *</Text>
+                    <View style={styles.batchDropdown}>
+                      <TouchableOpacity
+                        style={[
+                          styles.batchOption,
+                          newMember.batch === 'morning' && styles.batchOptionSelected,
+                        ]}
+                        onPress={() => setNewMember({ ...newMember, batch: 'morning' })}
+                        activeOpacity={0.7}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          <Text style={{ fontSize: 20 }}>🌅</Text>
+                          <Text style={[
+                            styles.batchOptionText,
+                            newMember.batch === 'morning' && styles.batchOptionTextSelected,
+                          ]}>
+                            Morning
                           </Text>
                         </View>
+                        {newMember.batch === 'morning' && (
+                          <CheckCircle size={20} color={theme.colors.primary} />
+                        )}
                       </TouchableOpacity>
 
-                      {showDatePicker && (
-                        <>
-                          {Platform.OS === 'web' ? (
-                            <input
-                              type="date"
-                              value={customStartDate}
-                              onChange={(e) => {
-                                setCustomStartDate(e.target.value);
-                                setShowDatePicker(false);
-                              }}
-                              min="2020-01-01"
-                              style={{
-                                width: '100%',
-                                padding: 16,
-                                fontSize: 16,
-                                borderRadius: 12,
-                                border: `1.5px solid ${theme.colors.border}`,
-                                backgroundColor: theme.colors.card,
-                                color: theme.colors.text,
-                                marginBottom: 16,
-                              }}
-                            />
-                          ) : (
-                            <DateTimePicker
-                              value={new Date(customStartDate + 'T12:00:00')}
-                              mode="date"
-                              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                              onChange={(event, selectedDate) => {
-                                setShowDatePicker(Platform.OS === 'ios');
-                                if (selectedDate) {
-                                  const year = selectedDate.getFullYear();
-                                  const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
-                                  const day = String(selectedDate.getDate()).padStart(2, '0');
-                                  setCustomStartDate(`${year}-${month}-${day}`);
-                                }
-                              }}
-                              minimumDate={new Date(2020, 0, 1)}
-                            />
-                          )}
-                        </>
-                      )}
+                      <TouchableOpacity
+                        style={[
+                          styles.batchOption,
+                          newMember.batch === 'evening' && styles.batchOptionSelected,
+                        ]}
+                        onPress={() => setNewMember({ ...newMember, batch: 'evening' })}
+                        activeOpacity={0.7}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          <Text style={{ fontSize: 20 }}>🌆</Text>
+                          <Text style={[
+                            styles.batchOptionText,
+                            newMember.batch === 'evening' && styles.batchOptionTextSelected,
+                          ]}>
+                            Evening
+                          </Text>
+                        </View>
+                        {newMember.batch === 'evening' && (
+                          <CheckCircle size={20} color={theme.colors.primary} />
+                        )}
+                      </TouchableOpacity>
 
-                      <Text style={styles.helperText}>
-                        Set a past date if member joined earlier. Default is today.
-                      </Text>
+                      <TouchableOpacity
+                        style={[
+                          styles.batchOption,
+                          styles.batchOptionLast,
+                          newMember.batch === 'night' && styles.batchOptionSelected,
+                        ]}
+                        onPress={() => setNewMember({ ...newMember, batch: 'night' })}
+                        activeOpacity={0.7}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          <Text style={{ fontSize: 20 }}>🌙</Text>
+                          <Text style={[
+                            styles.batchOptionText,
+                            newMember.batch === 'night' && styles.batchOptionTextSelected,
+                          ]}>
+                            Night
+                          </Text>
+                        </View>
+                        {newMember.batch === 'night' && (
+                          <CheckCircle size={20} color={theme.colors.primary} />
+                        )}
+                      </TouchableOpacity>
                     </View>
-                    {selectedSubscription && (
-                      <>
-                        <Text style={styles.inputLabel}>Payment Method</Text>
-                        <View style={styles.paymentMethodRow}>
-                          <TouchableOpacity
-                            style={[
-                              styles.paymentMethodOption,
-                              paymentMethod === 'cash' && styles.paymentMethodOptionSelected,
-                            ]}
-                            onPress={() => setPaymentMethod('cash')}
-                            activeOpacity={0.7}
-                          >
-                            <DollarSign size={20} color={paymentMethod === 'cash' ? '#FFFFFF' : theme.colors.textSecondary} />
-                            <Text style={[
-                              styles.paymentMethodText,
-                              paymentMethod === 'cash' && styles.paymentMethodTextSelected,
-                            ]}>
-                              Cash
-                            </Text>
-                          </TouchableOpacity>
+                    <Text style={styles.helperText}>
+                      Select the training batch for this member
+                    </Text>
+                  </View>
 
-                          <TouchableOpacity
-                            style={[
-                              styles.paymentMethodOption,
-                              paymentMethod === 'online' && styles.paymentMethodOptionSelected,
-                            ]}
-                            onPress={() => setPaymentMethod('online')}
-                            activeOpacity={0.7}
-                          >
-                            <CreditCard size={20} color={paymentMethod === 'online' ? '#FFFFFF' : theme.colors.textSecondary} />
-                            <Text style={[
-                              styles.paymentMethodText,
-                              paymentMethod === 'online' && styles.paymentMethodTextSelected,
-                            ]}>
-                              Online
-                            </Text>
-                          </TouchableOpacity>
+                  {/* Gender Selection */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Gender *</Text>
 
+
+                    <View style={styles.genderContainer}>
+                      <TouchableOpacity
+                        style={[
+                          styles.genderOption,
+                          selectedGender === 'male' && styles.genderOptionSelected,
+                        ]}
+                        onPress={() => setSelectedGender('male')}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name="male"
+                          size={24}
+                          color={selectedGender === 'male' ? theme.colors.primary : theme.colors.textSecondary}
+                        />
+                        <Text style={[
+                          styles.genderOptionText,
+                          selectedGender === 'male' && styles.genderOptionTextSelected,
+                        ]}>
+                          Male
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.genderOption,
+                          selectedGender === 'female' && styles.genderOptionSelected,
+                        ]}
+                        onPress={() => setSelectedGender('female')}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name="female"
+                          size={24}
+                          color={selectedGender === 'female' ? theme.colors.primary : theme.colors.textSecondary}
+                        />
+                        <Text style={[
+                          styles.genderOptionText,
+                          selectedGender === 'female' && styles.genderOptionTextSelected,
+                        ]}>
+                          Female
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <View style={styles.sectionDivider} />
+                  {/* Notes Field */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Notes (Optional)</Text>
+                    <TextInput
+                      style={[styles.input, { minHeight: 100, textAlignVertical: 'top' }]}
+                      placeholder="Add any notes about this member..."
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={newMember.notes}
+                      onChangeText={(text) => setNewMember({ ...newMember, notes: text })}
+                      multiline
+                      numberOfLines={4}
+                    />
+                    <Text style={styles.helperText}>
+                      Any additional information about the member (medical conditions, preferences, etc.)
+                    </Text>
+                  </View>
+
+                  <View style={styles.sectionDivider} />
+
+                  {/* Subscription Section */}
+                  <Text style={styles.sectionTitle}>Subscription (Optional)</Text>
+                  <Text style={styles.helperText}>
+                    Add a subscription plan with payment details or skip for later.
+                  </Text>
+
+                  {availableSubscriptions.length > 0 ? (
+                    <>
+                      <Text style={styles.inputLabel}>Select Plan</Text>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.subscriptionScroll}
+                      >
+                        {availableSubscriptions.map((sub) => (
                           <TouchableOpacity
+                            key={sub.id}
                             style={[
-                              styles.paymentMethodOption,
-                              paymentMethod === 'none' && styles.paymentMethodOptionSelected,
+                              styles.subscriptionOption,
+                              selectedSubscription?.id === sub.id && styles.subscriptionOptionSelected,
                             ]}
                             onPress={() => {
-                              setPaymentMethod('none');
-                              setSelectedSubscription(null);
+                              setSelectedSubscription(sub);
+                              if (paymentMethod === 'none') {
+                                setPaymentMethod('cash');
+                              }
+                              setAmountReceived('');
                             }}
                             activeOpacity={0.7}
                           >
                             <Text style={[
-                              styles.paymentMethodText,
-                              paymentMethod === 'none' && styles.paymentMethodTextSelected,
+                              styles.subscriptionName,
+                              selectedSubscription?.id === sub.id && styles.subscriptionNameSelected,
                             ]}>
-                              Skip
+                              {sub.name}
+                            </Text>
+                            <Text style={[
+                              styles.subscriptionPrice,
+                              selectedSubscription?.id === sub.id && styles.subscriptionPriceSelected,
+                            ]}>
+                              ₹{sub.price}
+                            </Text>
+                            <Text style={[
+                              styles.subscriptionDuration,
+                              selectedSubscription?.id === sub.id && styles.subscriptionDurationSelected,
+                            ]}>
+                              {sub.duration_months} month{sub.duration_months > 1 ? 's' : ''}
                             </Text>
                           </TouchableOpacity>
-                        </View>
+                        ))}
+                      </ScrollView>
+                      {/* Custom Start Date with DatePicker */}
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Subscription Start Date</Text>
 
-                        {/* Payment Fields (Same for both Cash and Online) */}
-{(paymentMethod === 'cash' || paymentMethod === 'online') && (
-  <>
-    <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>Plan Amount</Text>
-      <TextInput
-        style={[styles.input, styles.inputReadonly]}
-        value={`₹${selectedSubscription.price}`}
-        editable={false}
-      />
-    </View>
+                        <TouchableOpacity
+                          style={[styles.input, styles.datePickerButton]}
+                          onPress={() => setShowDatePicker(true)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.datePickerContent}>
+                            <Calendar size={20} color={theme.colors.textSecondary} />
+                            <Text style={styles.datePickerText}>
+                              {new Date(customStartDate + 'T12:00:00').toLocaleDateString('en-IN', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric'
+                              })}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
 
-    <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>Admission Fee</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Enter admission fee"
-        placeholderTextColor={theme.colors.textSecondary}
-        value={admissionFee}
-        onChangeText={setAdmissionFee}
-        keyboardType="decimal-pad"
-      />
-      <Text style={styles.helperText}>
-        One-time admission/registration fee
-      </Text>
-    </View>
+                        {showDatePicker && (
+                          <>
+                            {Platform.OS === 'web' ? (
+                              <input
+                                type="date"
+                                value={customStartDate}
+                                onChange={(e) => {
+                                  setCustomStartDate(e.target.value);
+                                  setShowDatePicker(false);
+                                }}
+                                min="2020-01-01"
+                                style={{
+                                  width: '100%',
+                                  padding: 16,
+                                  fontSize: 16,
+                                  borderRadius: 12,
+                                  border: `1.5px solid ${theme.colors.border}`,
+                                  backgroundColor: theme.colors.card,
+                                  color: theme.colors.text,
+                                  marginBottom: 16,
+                                }}
+                              />
+                            ) : (
+                              <DateTimePicker
+                                value={new Date(customStartDate + 'T12:00:00')}
+                                mode="date"
+                                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                                onChange={(event, selectedDate) => {
+                                  setShowDatePicker(Platform.OS === 'ios');
+                                  if (selectedDate) {
+                                    const year = selectedDate.getFullYear();
+                                    const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                                    const day = String(selectedDate.getDate()).padStart(2, '0');
+                                    setCustomStartDate(`${year}-${month}-${day}`);
+                                  }
+                                }}
+                                minimumDate={new Date(2020, 0, 1)}
+                              />
+                            )}
+                          </>
+                        )}
 
-    <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>Discount Amount (Optional)</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Enter discount amount"
-        placeholderTextColor={theme.colors.textSecondary}
-        value={discountAmount}
-        onChangeText={setDiscountAmount}
-        keyboardType="decimal-pad"
-      />
-      <Text style={styles.helperText}>
-        Enter discount amount to reduce from total
-      </Text>
-    </View>
+                        <Text style={styles.helperText}>
+                          Set a past date if member joined earlier. Default is today.
+                        </Text>
+                      </View>
+                      {selectedSubscription && (
+                        <>
+                          <Text style={styles.inputLabel}>Payment Method</Text>
+                          <View style={styles.paymentMethodRow}>
+                            <TouchableOpacity
+                              style={[
+                                styles.paymentMethodOption,
+                                paymentMethod === 'cash' && styles.paymentMethodOptionSelected,
+                              ]}
+                              onPress={() => setPaymentMethod('cash')}
+                              activeOpacity={0.7}
+                            >
+                              <DollarSign size={20} color={paymentMethod === 'cash' ? '#FFFFFF' : theme.colors.textSecondary} />
+                              <Text style={[
+                                styles.paymentMethodText,
+                                paymentMethod === 'cash' && styles.paymentMethodTextSelected,
+                              ]}>
+                                Cash
+                              </Text>
+                            </TouchableOpacity>
 
-    {/* Price Breakdown */}
-    <View style={styles.priceBreakdown}>
-      <View style={styles.breakdownRow}>
-        <Text style={styles.breakdownLabel}>Plan Price:</Text>
-        <Text style={styles.breakdownValue}>₹{selectedSubscription.price}</Text>
-      </View>
-      <View style={styles.breakdownRow}>
-        <Text style={styles.breakdownLabel}>Admission Fee:</Text>
-        <Text style={styles.breakdownValue}>+ ₹{admissionFee || '0'}</Text>
-      </View>
-      {discountAmount && parseFloat(discountAmount) > 0 && (
-        <View style={styles.breakdownRow}>
-          <Text style={[styles.breakdownLabel, { color: theme.colors.success }]}>
-            Discount:
-          </Text>
-          <Text style={[styles.breakdownValue, { color: theme.colors.success }]}>
-            - ₹{discountAmount}
-          </Text>
-        </View>
-      )}
-      <View style={[styles.breakdownRow, styles.breakdownTotal]}>
-        <Text style={styles.breakdownTotalLabel}>Final Amount:</Text>
-        <Text style={styles.breakdownTotalValue}>
-          ₹{calculateFinalAmount().toFixed(2)}
-        </Text>
-      </View>
-    </View>
+                            <TouchableOpacity
+                              style={[
+                                styles.paymentMethodOption,
+                                paymentMethod === 'online' && styles.paymentMethodOptionSelected,
+                              ]}
+                              onPress={() => setPaymentMethod('online')}
+                              activeOpacity={0.7}
+                            >
+                              <CreditCard size={20} color={paymentMethod === 'online' ? '#FFFFFF' : theme.colors.textSecondary} />
+                              <Text style={[
+                                styles.paymentMethodText,
+                                paymentMethod === 'online' && styles.paymentMethodTextSelected,
+                              ]}>
+                                Online
+                              </Text>
+                            </TouchableOpacity>
 
-    <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>Amount Received *</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Enter amount received now"
-        placeholderTextColor={theme.colors.textSecondary}
-        value={amountReceived}
-        onChangeText={setAmountReceived}
-        keyboardType="decimal-pad"
-      />
-      <Text style={styles.helperText}>
-        Can be partial payment. Remaining will be tracked as pending.
-      </Text>
-    </View>
+                            <TouchableOpacity
+                              style={[
+                                styles.paymentMethodOption,
+                                paymentMethod === 'none' && styles.paymentMethodOptionSelected,
+                              ]}
+                              onPress={() => {
+                                setPaymentMethod('none');
+                                setSelectedSubscription(null);
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[
+                                styles.paymentMethodText,
+                                paymentMethod === 'none' && styles.paymentMethodTextSelected,
+                              ]}>
+                                Skip
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
 
-    <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>Remaining Amount</Text>
-      <TextInput
-        style={[styles.input, styles.inputReadonly]}
-        value={`₹${calculateRemainingAmount().toFixed(2)}`}
-        editable={false}
-      />
-    </View>
+                          {/* Payment Fields (Same for both Cash and Online) */}
+                          {(paymentMethod === 'cash' || paymentMethod === 'online') && (
+                            <>
+                              <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Plan Amount</Text>
+                                <TextInput
+                                  style={[styles.input, styles.inputReadonly]}
+                                  value={`₹${selectedSubscription.price}`}
+                                  editable={false}
+                                />
+                              </View>
 
-    {/* Payment Summary Card */}
-    <View style={styles.paymentSummary}>
-      <View style={styles.paymentSummaryRow}>
-        <Text style={styles.paymentSummaryLabel}>Final Amount:</Text>
-        <Text style={styles.paymentSummaryValue}>
-          ₹{calculateFinalAmount().toFixed(2)}
-        </Text>
-      </View>
-      <View style={styles.paymentSummaryRow}>
-        <Text style={styles.paymentSummaryLabel}>Amount Received:</Text>
-        <Text style={styles.paymentSummaryValue}>
-          ₹{amountReceived ? parseFloat(amountReceived).toFixed(2) : '0.00'}
-        </Text>
-      </View>
-      <View style={[styles.paymentSummaryRow, styles.paymentSummaryTotal]}>
-        <Text style={styles.paymentSummaryTotalLabel}>Pending Amount:</Text>
-        <View style={{ alignItems: 'flex-end', gap: 8 }}>
-          <Text style={styles.paymentSummaryTotalValue}>
-            ₹{calculateRemainingAmount().toFixed(2)}
-          </Text>
-          <View style={[
-            styles.paymentStatusBadge,
-            calculateRemainingAmount() === 0
-              ? styles.paymentStatusBadgeComplete
-              : styles.paymentStatusBadgePartial
-          ]}>
-            {calculateRemainingAmount() === 0 ? (
-              <>
-                <CheckCircle size={14} color={theme.colors.success} />
-                <Text style={[styles.paymentStatusText, styles.paymentStatusTextComplete]}>
-                  Fully Paid
-                </Text>
-              </>
-            ) : (
-              <>
-                <AlertCircle size={14} color={theme.colors.warning} />
-                <Text style={[styles.paymentStatusText, styles.paymentStatusTextPartial]}>
-                  Partial Payment
-                </Text>
-              </>
-            )}
-          </View>
-        </View>
-      </View>
-    </View>
+                              <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Admission Fee</Text>
+                                <TextInput
+                                  style={styles.input}
+                                  placeholder="Enter admission fee"
+                                  placeholderTextColor={theme.colors.textSecondary}
+                                  value={admissionFee}
+                                  onChangeText={setAdmissionFee}
+                                  keyboardType="decimal-pad"
+                                />
+                                <Text style={styles.helperText}>
+                                  One-time admission/registration fee
+                                </Text>
+                              </View>
 
-    {/* Rest of the payment fields (Receipt Number, Notes) remain the same */}
-    <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>Receipt Number (Optional)</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Auto-generated if left blank"
-        placeholderTextColor={theme.colors.textSecondary}
-        value={receiptNumber}
-        onChangeText={setReceiptNumber}
-      />
-    </View>
+                              <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Discount Amount (Optional)</Text>
+                                <TextInput
+                                  style={styles.input}
+                                  placeholder="Enter discount amount"
+                                  placeholderTextColor={theme.colors.textSecondary}
+                                  value={discountAmount}
+                                  onChangeText={setDiscountAmount}
+                                  keyboardType="decimal-pad"
+                                />
+                                <Text style={styles.helperText}>
+                                  Enter discount amount to reduce from total
+                                </Text>
+                              </View>
 
-    <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>Payment Notes (Optional)</Text>
-      <TextInput
-        style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
-        placeholder="Add any notes about this payment..."
-        placeholderTextColor={theme.colors.textSecondary}
-        value={paymentNotes}
-        onChangeText={setPaymentNotes}
-        multiline
-        numberOfLines={3}
-      />
-    </View>
+                              {/* Price Breakdown */}
+                              <View style={styles.priceBreakdown}>
+                                <View style={styles.breakdownRow}>
+                                  <Text style={styles.breakdownLabel}>Plan Price:</Text>
+                                  <Text style={styles.breakdownValue}>₹{selectedSubscription.price}</Text>
+                                </View>
+                                <View style={styles.breakdownRow}>
+                                  <Text style={styles.breakdownLabel}>Admission Fee:</Text>
+                                  <Text style={styles.breakdownValue}>+ ₹{admissionFee || '0'}</Text>
+                                </View>
+                                {discountAmount && parseFloat(discountAmount) > 0 && (
+                                  <View style={styles.breakdownRow}>
+                                    <Text style={[styles.breakdownLabel, { color: theme.colors.success }]}>
+                                      Discount:
+                                    </Text>
+                                    <Text style={[styles.breakdownValue, { color: theme.colors.success }]}>
+                                      - ₹{discountAmount}
+                                    </Text>
+                                  </View>
+                                )}
+                                <View style={[styles.breakdownRow, styles.breakdownTotal]}>
+                                  <Text style={styles.breakdownTotalLabel}>Final Amount:</Text>
+                                  <Text style={styles.breakdownTotalValue}>
+                                    ₹{calculateFinalAmount().toFixed(2)}
+                                  </Text>
+                                </View>
+                              </View>
 
-    {paymentMethod === 'online' && (
-      <Text style={styles.helperText}>
-        💡 Member paid online. Amount will be recorded for tracking.
-      </Text>
-    )}
-  </>
-)}
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <Text style={styles.helperText}>
-                    No subscription plans available. Create plans in Subscriptions section.
-                  </Text>
-                )}
+                              <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Amount Received *</Text>
+                                <TextInput
+                                  style={styles.input}
+                                  placeholder="Enter amount received now"
+                                  placeholderTextColor={theme.colors.textSecondary}
+                                  value={amountReceived}
+                                  onChangeText={setAmountReceived}
+                                  keyboardType="decimal-pad"
+                                />
+                                <Text style={styles.helperText}>
+                                  Can be partial payment. Remaining will be tracked as pending.
+                                </Text>
+                              </View>
 
-                <Button
-                  title="Add Member"
-                  onPress={addMember}
-                  isLoading={isLoading}
-                  style={styles.addButton}
-                />
-              </ScrollView>
-            </View>
-          </SafeAreaView>
+                              <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Remaining Amount</Text>
+                                <TextInput
+                                  style={[styles.input, styles.inputReadonly]}
+                                  value={`₹${calculateRemainingAmount().toFixed(2)}`}
+                                  editable={false}
+                                />
+                              </View>
+
+                              {/* Payment Summary Card */}
+                              <View style={styles.paymentSummary}>
+                                <View style={styles.paymentSummaryRow}>
+                                  <Text style={styles.paymentSummaryLabel}>Final Amount:</Text>
+                                  <Text style={styles.paymentSummaryValue}>
+                                    ₹{calculateFinalAmount().toFixed(2)}
+                                  </Text>
+                                </View>
+                                <View style={styles.paymentSummaryRow}>
+                                  <Text style={styles.paymentSummaryLabel}>Amount Received:</Text>
+                                  <Text style={styles.paymentSummaryValue}>
+                                    ₹{amountReceived ? parseFloat(amountReceived).toFixed(2) : '0.00'}
+                                  </Text>
+                                </View>
+                                <View style={[styles.paymentSummaryRow, styles.paymentSummaryTotal]}>
+                                  <Text style={styles.paymentSummaryTotalLabel}>Pending Amount:</Text>
+                                  <View style={{ alignItems: 'flex-end', gap: 8 }}>
+                                    <Text style={styles.paymentSummaryTotalValue}>
+                                      ₹{calculateRemainingAmount().toFixed(2)}
+                                    </Text>
+                                    <View style={[
+                                      styles.paymentStatusBadge,
+                                      calculateRemainingAmount() === 0
+                                        ? styles.paymentStatusBadgeComplete
+                                        : styles.paymentStatusBadgePartial
+                                    ]}>
+                                      {calculateRemainingAmount() === 0 ? (
+                                        <>
+                                          <CheckCircle size={14} color={theme.colors.success} />
+                                          <Text style={[styles.paymentStatusText, styles.paymentStatusTextComplete]}>
+                                            Fully Paid
+                                          </Text>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <AlertCircle size={14} color={theme.colors.warning} />
+                                          <Text style={[styles.paymentStatusText, styles.paymentStatusTextPartial]}>
+                                            Partial Payment
+                                          </Text>
+                                        </>
+                                      )}
+                                    </View>
+                                  </View>
+                                </View>
+                              </View>
+
+                              {/* Rest of the payment fields (Receipt Number, Notes) remain the same */}
+                              <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Receipt Number (Optional)</Text>
+                                <TextInput
+                                  style={styles.input}
+                                  placeholder="Auto-generated if left blank"
+                                  placeholderTextColor={theme.colors.textSecondary}
+                                  value={receiptNumber}
+                                  onChangeText={setReceiptNumber}
+                                />
+                              </View>
+
+                              <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Payment Notes (Optional)</Text>
+                                <TextInput
+                                  style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
+                                  placeholder="Add any notes about this payment..."
+                                  placeholderTextColor={theme.colors.textSecondary}
+                                  value={paymentNotes}
+                                  onChangeText={setPaymentNotes}
+                                  multiline
+                                  numberOfLines={3}
+                                />
+                              </View>
+
+                              {paymentMethod === 'online' && (
+                                <Text style={styles.helperText}>
+                                  💡 Member paid online. Amount will be recorded for tracking.
+                                </Text>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <Text style={styles.helperText}>
+                      No subscription plans available. Create plans in Subscriptions section.
+                    </Text>
+                  )}
+
+                  <Button
+                    title="Add Member"
+                    onPress={addMember}
+                    isLoading={isLoading}
+                    style={styles.addButton}
+                  />
+                </ScrollView>
+              </View>
+            </SafeAreaView>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* ==================== PAY PENDING MODAL ==================== */}
@@ -3535,85 +3729,91 @@ ${gymName}`;
           presentationStyle="pageSheet"
           onRequestClose={() => setShowPayPendingModal(false)}
         >
-          <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Pay Pending Amount</Text>
-                <TouchableOpacity
-                  onPress={() => setShowPayPendingModal(false)}
-                  style={styles.closeButton}
-                >
-                  <X size={24} color={theme.colors.text} />
-                </TouchableOpacity>
-              </View>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          >
+            <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Pay Pending Amount</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowPayPendingModal(false)}
+                    style={styles.closeButton}
+                  >
+                    <X size={24} color={theme.colors.text} />
+                  </TouchableOpacity>
+                </View>
 
-              <ScrollView
-                style={styles.modalScrollView}
-                contentContainerStyle={styles.modalContent}
-                keyboardShouldPersistTaps="handled"
-              >
-                {selectedMember?.currentSubscription && (
-                  <>
-                    <Card style={styles.overviewCard}>
-                      <View style={{ alignItems: 'center', paddingVertical: 20 }}>
-                        <Text style={styles.inputLabel}>Current Pending Amount</Text>
-                        <Text style={[styles.paymentSummaryTotalValue, { fontSize: 36, marginTop: 8, color: theme.colors.warning }]}>
-                          {formatRupees(selectedMember.currentSubscription.pending_amount || 0)}
+                <ScrollView
+                  style={styles.modalScrollView}
+                  contentContainerStyle={styles.modalContent}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {selectedMember?.currentSubscription && (
+                    <>
+                      <Card style={styles.overviewCard}>
+                        <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                          <Text style={styles.inputLabel}>Current Pending Amount</Text>
+                          <Text style={[styles.paymentSummaryTotalValue, { fontSize: 36, marginTop: 8, color: theme.colors.warning }]}>
+                            {formatRupees(selectedMember.currentSubscription.pending_amount || 0)}
+                          </Text>
+                        </View>
+                      </Card>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Payment Amount *</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Enter payment amount"
+                          placeholderTextColor={theme.colors.textSecondary}
+                          value={pendingPaymentAmount}
+                          onChangeText={setPendingPaymentAmount}
+                          keyboardType="decimal-pad"
+                        />
+                        <Text style={styles.helperText}>
+                          Maximum: {formatRupees(selectedMember.currentSubscription.pending_amount || 0)}
                         </Text>
                       </View>
-                    </Card>
 
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.inputLabel}>Payment Amount *</Text>
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Enter payment amount"
-                        placeholderTextColor={theme.colors.textSecondary}
-                        value={pendingPaymentAmount}
-                        onChangeText={setPendingPaymentAmount}
-                        keyboardType="decimal-pad"
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Receipt Number (Optional)</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Auto-generated if left blank"
+                          placeholderTextColor={theme.colors.textSecondary}
+                          value={pendingReceiptNumber}
+                          onChangeText={setPendingReceiptNumber}
+                        />
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Payment Notes (Optional)</Text>
+                        <TextInput
+                          style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
+                          placeholder="Add notes about this payment..."
+                          placeholderTextColor={theme.colors.textSecondary}
+                          value={pendingPaymentNotes}
+                          onChangeText={setPendingPaymentNotes}
+                          multiline
+                          numberOfLines={3}
+                        />
+                      </View>
+
+                      <Button
+                        title="Collect Payment"
+                        onPress={payPendingAmount}
+                        isLoading={isLoading}
+                        disabled={!pendingPaymentAmount || parseFloat(pendingPaymentAmount) <= 0}
+                        style={styles.addButton}
                       />
-                      <Text style={styles.helperText}>
-                        Maximum: {formatRupees(selectedMember.currentSubscription.pending_amount || 0)}
-                      </Text>
-                    </View>
-
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.inputLabel}>Receipt Number (Optional)</Text>
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Auto-generated if left blank"
-                        placeholderTextColor={theme.colors.textSecondary}
-                        value={pendingReceiptNumber}
-                        onChangeText={setPendingReceiptNumber}
-                      />
-                    </View>
-
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.inputLabel}>Payment Notes (Optional)</Text>
-                      <TextInput
-                        style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
-                        placeholder="Add notes about this payment..."
-                        placeholderTextColor={theme.colors.textSecondary}
-                        value={pendingPaymentNotes}
-                        onChangeText={setPendingPaymentNotes}
-                        multiline
-                        numberOfLines={3}
-                      />
-                    </View>
-
-                    <Button
-                      title="Collect Payment"
-                      onPress={payPendingAmount}
-                      isLoading={isLoading}
-                      disabled={!pendingPaymentAmount || parseFloat(pendingPaymentAmount) <= 0}
-                      style={styles.addButton}
-                    />
-                  </>
-                )}
-              </ScrollView>
-            </View>
-          </SafeAreaView>
+                    </>
+                  )}
+                </ScrollView>
+              </View>
+            </SafeAreaView>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* ==================== ATTENDANCE CALENDAR MODAL (IMPROVED) ==================== */}
@@ -3623,257 +3823,263 @@ ${gymName}`;
           presentationStyle="fullScreen"
           onRequestClose={() => setShowAttendanceCalendar(false)}
         >
-          <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
-            <View style={styles.modalContainer}>
-              {/* Header */}
-              <View style={styles.modalHeader}>
-                <View style={styles.attendanceHeaderContent}>
-                  <Calendar size={24} color={theme.colors.primary} />
-                  <Text style={styles.modalTitle}>Attendance Calendar</Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => setShowAttendanceCalendar(false)}
-                  style={styles.closeButton}
-                >
-                  <X size={24} color={theme.colors.text} />
-                </TouchableOpacity>
-              </View>
-
-              <ScrollView
-                style={styles.modalScrollView}
-                contentContainerStyle={styles.modalContent}
-                showsVerticalScrollIndicator={false}
-              >
-                {/* Overall Stats Card */}
-                <Card style={styles.attendanceStatsCard}>
-                  <View style={styles.attendanceStatsHeader}>
-                    <View style={styles.memberAvatarSmall}>
-                      <User size={20} color="#ffffff" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.attendanceStatsName}>{selectedMember?.full_name}</Text>
-                      <Text style={styles.attendanceStatsSubtext}>Overall Attendance Summary</Text>
-                    </View>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          >
+            <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
+              <View style={styles.modalContainer}>
+                {/* Header */}
+                <View style={styles.modalHeader}>
+                  <View style={styles.attendanceHeaderContent}>
+                    <Calendar size={24} color={theme.colors.primary} />
+                    <Text style={styles.modalTitle}>Attendance Calendar</Text>
                   </View>
+                  <TouchableOpacity
+                    onPress={() => setShowAttendanceCalendar(false)}
+                    style={styles.closeButton}
+                  >
+                    <X size={24} color={theme.colors.text} />
+                  </TouchableOpacity>
+                </View>
 
-                  {(() => {
-                    const totalCheckIns = memberAttendance.length;
-
-                    // Calculate date range
-                    let earliestDate = new Date();
-                    let latestDate = new Date();
-
-                    if (totalCheckIns > 0) {
-                      const dates = memberAttendance.map(a => new Date(a.attendance_date));
-                      earliestDate = new Date(Math.min(...dates.map(d => d.getTime())));
-                      latestDate = new Date(Math.max(...dates.map(d => d.getTime())));
-                    }
-
-                    // Calculate total days between first and last check-in
-                    const daysDifference = totalCheckIns > 0
-                      ? Math.ceil((latestDate.getTime() - earliestDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
-                      : 0;
-
-                    const attendanceRate = daysDifference > 0
-                      ? ((totalCheckIns / daysDifference) * 100).toFixed(1)
-                      : 0;
-
-                    return (
-                      <View style={styles.attendanceOverallStats}>
-                        <View style={styles.attendanceStatBox}>
-                          <View style={[styles.attendanceStatIcon, { backgroundColor: theme.colors.primary + '20' }]}>
-                            <CheckCircle size={24} color={theme.colors.primary} />
-                          </View>
-                          <Text style={styles.attendanceStatValue}>{totalCheckIns}</Text>
-                          <Text style={styles.attendanceStatLabel}>Total Check-ins</Text>
-                        </View>
-
-                        <View style={styles.attendanceStatBox}>
-                          <View style={[styles.attendanceStatIcon, { backgroundColor: theme.colors.success + '20' }]}>
-                            <Calendar size={24} color={theme.colors.success} />
-                          </View>
-                          <Text style={styles.attendanceStatValue}>{daysDifference}</Text>
-                          <Text style={styles.attendanceStatLabel}>Total Days</Text>
-                        </View>
-
-                        <View style={styles.attendanceStatBox}>
-                          <View style={[styles.attendanceStatIcon, { backgroundColor: theme.colors.warning + '20' }]}>
-                            <TrendingUp size={24} color={theme.colors.warning} />
-                          </View>
-                          <Text style={styles.attendanceStatValue}>{attendanceRate}%</Text>
-                          <Text style={styles.attendanceStatLabel}>Attendance Rate</Text>
-                        </View>
+                <ScrollView
+                  style={styles.modalScrollView}
+                  contentContainerStyle={styles.modalContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {/* Overall Stats Card */}
+                  <Card style={styles.attendanceStatsCard}>
+                    <View style={styles.attendanceStatsHeader}>
+                      <View style={styles.memberAvatarSmall}>
+                        <User size={20} color="#ffffff" />
                       </View>
-                    );
-                  })()}
-                </Card>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.attendanceStatsName}>{selectedMember?.full_name}</Text>
+                        <Text style={styles.attendanceStatsSubtext}>Overall Attendance Summary</Text>
+                      </View>
+                    </View>
 
-                {/* Monthly Breakdown */}
-                {(() => {
-                  const monthlyData: { [key: string]: any[] } = {};
-                  const dailyCheckIns: { [key: string]: number } = {};
+                    {(() => {
+                      const totalCheckIns = memberAttendance.length;
 
-                  // Group by month and count daily check-ins
-                  memberAttendance.forEach((att) => {
-                    const date = new Date(att.attendance_date);
-                    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-                    const dateKey = att.attendance_date;
+                      // Calculate date range
+                      let earliestDate = new Date();
+                      let latestDate = new Date();
 
-                    if (!monthlyData[monthKey]) {
-                      monthlyData[monthKey] = [];
-                    }
-                    monthlyData[monthKey].push(att);
+                      if (totalCheckIns > 0) {
+                        const dates = memberAttendance.map(a => new Date(a.attendance_date));
+                        earliestDate = new Date(Math.min(...dates.map(d => d.getTime())));
+                        latestDate = new Date(Math.max(...dates.map(d => d.getTime())));
+                      }
 
-                    dailyCheckIns[dateKey] = (dailyCheckIns[dateKey] || 0) + 1;
-                  });
+                      // Calculate total days between first and last check-in
+                      const daysDifference = totalCheckIns > 0
+                        ? Math.ceil((latestDate.getTime() - earliestDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+                        : 0;
 
-                  return Object.keys(monthlyData)
-                    .sort()
-                    .reverse()
-                    .map((monthKey) => {
-                      const [year, month] = monthKey.split('-');
-                      const monthDate = new Date(parseInt(year), parseInt(month) - 1);
-                      const monthName = monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-                      const daysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
-                      const firstDay = new Date(parseInt(year), parseInt(month) - 1, 1).getDay();
-
-                      const attendanceDates = new Set(
-                        monthlyData[monthKey].map(a => new Date(a.attendance_date).getDate())
-                      );
-
-                      const attendedDays = attendanceDates.size;
-                      const monthAttendanceRate = ((attendedDays / daysInMonth) * 100).toFixed(1);
-                      const totalCheckInsThisMonth = monthlyData[monthKey].length;
+                      const attendanceRate = daysDifference > 0
+                        ? ((totalCheckIns / daysDifference) * 100).toFixed(1)
+                        : 0;
 
                       return (
-                        <Card key={monthKey} style={styles.monthCard}>
-                          {/* Month Header */}
-                          <View style={styles.monthHeader}>
-                            <View>
-                              <Text style={styles.monthTitle}>{monthName}</Text>
-                              <Text style={styles.monthSubtitle}>
-                                {attendedDays} of {daysInMonth} days attended
-                              </Text>
+                        <View style={styles.attendanceOverallStats}>
+                          <View style={styles.attendanceStatBox}>
+                            <View style={[styles.attendanceStatIcon, { backgroundColor: theme.colors.primary + '20' }]}>
+                              <CheckCircle size={24} color={theme.colors.primary} />
                             </View>
-                            <View style={styles.monthStatsChip}>
-                              <Text style={styles.monthStatsChipText}>{monthAttendanceRate}%</Text>
-                            </View>
+                            <Text style={styles.attendanceStatValue}>{totalCheckIns}</Text>
+                            <Text style={styles.attendanceStatLabel}>Total Check-ins</Text>
                           </View>
 
-                          {/* Month Stats Row */}
-                          <View style={styles.monthStatsRow}>
-                            <View style={styles.monthStatItem}>
-                              <Text style={styles.monthStatValue}>{totalCheckInsThisMonth}</Text>
-                              <Text style={styles.monthStatLabel}>Check-ins</Text>
+                          <View style={styles.attendanceStatBox}>
+                            <View style={[styles.attendanceStatIcon, { backgroundColor: theme.colors.success + '20' }]}>
+                              <Calendar size={24} color={theme.colors.success} />
                             </View>
-                            <View style={styles.monthStatItem}>
-                              <Text style={styles.monthStatValue}>{attendedDays}</Text>
-                              <Text style={styles.monthStatLabel}>Days Present</Text>
-                            </View>
-                            <View style={styles.monthStatItem}>
-                              <Text style={styles.monthStatValue}>{daysInMonth - attendedDays}</Text>
-                              <Text style={styles.monthStatLabel}>Days Missed</Text>
-                            </View>
+                            <Text style={styles.attendanceStatValue}>{daysDifference}</Text>
+                            <Text style={styles.attendanceStatLabel}>Total Days</Text>
                           </View>
 
-                          {/* Calendar Grid */}
-                          <View style={styles.calendarContainer}>
-                            {/* Week days header */}
-                            <View style={styles.calendarWeekRow}>
-                              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
-                                <View key={index} style={styles.calendarHeaderCell}>
-                                  <Text style={styles.calendarHeaderText}>{day}</Text>
-                                </View>
-                              ))}
+                          <View style={styles.attendanceStatBox}>
+                            <View style={[styles.attendanceStatIcon, { backgroundColor: theme.colors.warning + '20' }]}>
+                              <TrendingUp size={24} color={theme.colors.warning} />
+                            </View>
+                            <Text style={styles.attendanceStatValue}>{attendanceRate}%</Text>
+                            <Text style={styles.attendanceStatLabel}>Attendance Rate</Text>
+                          </View>
+                        </View>
+                      );
+                    })()}
+                  </Card>
+
+                  {/* Monthly Breakdown */}
+                  {(() => {
+                    const monthlyData: { [key: string]: any[] } = {};
+                    const dailyCheckIns: { [key: string]: number } = {};
+
+                    // Group by month and count daily check-ins
+                    memberAttendance.forEach((att) => {
+                      const date = new Date(att.attendance_date);
+                      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                      const dateKey = att.attendance_date;
+
+                      if (!monthlyData[monthKey]) {
+                        monthlyData[monthKey] = [];
+                      }
+                      monthlyData[monthKey].push(att);
+
+                      dailyCheckIns[dateKey] = (dailyCheckIns[dateKey] || 0) + 1;
+                    });
+
+                    return Object.keys(monthlyData)
+                      .sort()
+                      .reverse()
+                      .map((monthKey) => {
+                        const [year, month] = monthKey.split('-');
+                        const monthDate = new Date(parseInt(year), parseInt(month) - 1);
+                        const monthName = monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                        const daysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
+                        const firstDay = new Date(parseInt(year), parseInt(month) - 1, 1).getDay();
+
+                        const attendanceDates = new Set(
+                          monthlyData[monthKey].map(a => new Date(a.attendance_date).getDate())
+                        );
+
+                        const attendedDays = attendanceDates.size;
+                        const monthAttendanceRate = ((attendedDays / daysInMonth) * 100).toFixed(1);
+                        const totalCheckInsThisMonth = monthlyData[monthKey].length;
+
+                        return (
+                          <Card key={monthKey} style={styles.monthCard}>
+                            {/* Month Header */}
+                            <View style={styles.monthHeader}>
+                              <View>
+                                <Text style={styles.monthTitle}>{monthName}</Text>
+                                <Text style={styles.monthSubtitle}>
+                                  {attendedDays} of {daysInMonth} days attended
+                                </Text>
+                              </View>
+                              <View style={styles.monthStatsChip}>
+                                <Text style={styles.monthStatsChipText}>{monthAttendanceRate}%</Text>
+                              </View>
                             </View>
 
-                            {/* Days grid */}
-                            <View style={styles.calendarDaysGrid}>
-                              {/* Empty cells for days before month starts */}
-                              {Array.from({ length: firstDay }).map((_, i) => (
-                                <View key={`empty-${i}`} style={styles.calendarDayCell} />
-                              ))}
+                            {/* Month Stats Row */}
+                            <View style={styles.monthStatsRow}>
+                              <View style={styles.monthStatItem}>
+                                <Text style={styles.monthStatValue}>{totalCheckInsThisMonth}</Text>
+                                <Text style={styles.monthStatLabel}>Check-ins</Text>
+                              </View>
+                              <View style={styles.monthStatItem}>
+                                <Text style={styles.monthStatValue}>{attendedDays}</Text>
+                                <Text style={styles.monthStatLabel}>Days Present</Text>
+                              </View>
+                              <View style={styles.monthStatItem}>
+                                <Text style={styles.monthStatValue}>{daysInMonth - attendedDays}</Text>
+                                <Text style={styles.monthStatLabel}>Days Missed</Text>
+                              </View>
+                            </View>
 
-                              {/* Actual days */}
-                              {Array.from({ length: daysInMonth }).map((_, i) => {
-                                const dayNumber = i + 1;
-                                const hasAttendance = attendanceDates.has(dayNumber);
-                                const dateKey = `${year}-${month}-${String(dayNumber).padStart(2, '0')}`;
-                                const checkInCount = dailyCheckIns[dateKey] || 0;
+                            {/* Calendar Grid */}
+                            <View style={styles.calendarContainer}>
+                              {/* Week days header */}
+                              <View style={styles.calendarWeekRow}>
+                                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+                                  <View key={index} style={styles.calendarHeaderCell}>
+                                    <Text style={styles.calendarHeaderText}>{day}</Text>
+                                  </View>
+                                ))}
+                              </View>
 
-                                const isToday =
-                                  new Date().getDate() === dayNumber &&
-                                  new Date().getMonth() === parseInt(month) - 1 &&
-                                  new Date().getFullYear() === parseInt(year);
+                              {/* Days grid */}
+                              <View style={styles.calendarDaysGrid}>
+                                {/* Empty cells for days before month starts */}
+                                {Array.from({ length: firstDay }).map((_, i) => (
+                                  <View key={`empty-${i}`} style={styles.calendarDayCell} />
+                                ))}
 
-                                return (
-                                  <View
-                                    key={dayNumber}
-                                    style={[
-                                      styles.calendarDayCell,
-                                      hasAttendance && styles.calendarDayCellAttended,
-                                      isToday && styles.calendarDayCellToday,
-                                    ]}
-                                  >
-                                    <Text
+                                {/* Actual days */}
+                                {Array.from({ length: daysInMonth }).map((_, i) => {
+                                  const dayNumber = i + 1;
+                                  const hasAttendance = attendanceDates.has(dayNumber);
+                                  const dateKey = `${year}-${month}-${String(dayNumber).padStart(2, '0')}`;
+                                  const checkInCount = dailyCheckIns[dateKey] || 0;
+
+                                  const isToday =
+                                    new Date().getDate() === dayNumber &&
+                                    new Date().getMonth() === parseInt(month) - 1 &&
+                                    new Date().getFullYear() === parseInt(year);
+
+                                  return (
+                                    <View
+                                      key={dayNumber}
                                       style={[
-                                        styles.calendarDayText,
-                                        hasAttendance && styles.calendarDayTextAttended,
-                                        isToday && styles.calendarDayTextToday,
+                                        styles.calendarDayCell,
+                                        hasAttendance && styles.calendarDayCellAttended,
+                                        isToday && styles.calendarDayCellToday,
                                       ]}
                                     >
-                                      {dayNumber}
-                                    </Text>
-                                    {hasAttendance && (
-                                      <>
-                                        <View style={styles.attendanceIndicator}>
-                                          <CheckCircle size={10} color={theme.colors.success} />
-                                        </View>
-                                        {checkInCount > 1 && (
-                                          <View style={styles.checkInBadge}>
-                                            <Text style={styles.checkInBadgeText}>{checkInCount}</Text>
+                                      <Text
+                                        style={[
+                                          styles.calendarDayText,
+                                          hasAttendance && styles.calendarDayTextAttended,
+                                          isToday && styles.calendarDayTextToday,
+                                        ]}
+                                      >
+                                        {dayNumber}
+                                      </Text>
+                                      {hasAttendance && (
+                                        <>
+                                          <View style={styles.attendanceIndicator}>
+                                            <CheckCircle size={10} color={theme.colors.success} />
                                           </View>
-                                        )}
-                                      </>
-                                    )}
-                                  </View>
-                                );
-                              })}
+                                          {checkInCount > 1 && (
+                                            <View style={styles.checkInBadge}>
+                                              <Text style={styles.checkInBadgeText}>{checkInCount}</Text>
+                                            </View>
+                                          )}
+                                        </>
+                                      )}
+                                    </View>
+                                  );
+                                })}
+                              </View>
                             </View>
-                          </View>
 
-                          {/* Legend */}
-                          <View style={styles.legendContainer}>
-                            <View style={styles.legendItem}>
-                              <View style={[styles.legendDot, { backgroundColor: theme.colors.success }]} />
-                              <Text style={styles.legendText}>Present</Text>
+                            {/* Legend */}
+                            <View style={styles.legendContainer}>
+                              <View style={styles.legendItem}>
+                                <View style={[styles.legendDot, { backgroundColor: theme.colors.success }]} />
+                                <Text style={styles.legendText}>Present</Text>
+                              </View>
+                              <View style={styles.legendItem}>
+                                <View style={[styles.legendDot, { backgroundColor: theme.colors.primary }]} />
+                                <Text style={styles.legendText}>Today</Text>
+                              </View>
+                              <View style={styles.legendItem}>
+                                <View style={[styles.legendDot, { backgroundColor: theme.colors.border }]} />
+                                <Text style={styles.legendText}>Absent</Text>
+                              </View>
                             </View>
-                            <View style={styles.legendItem}>
-                              <View style={[styles.legendDot, { backgroundColor: theme.colors.primary }]} />
-                              <Text style={styles.legendText}>Today</Text>
-                            </View>
-                            <View style={styles.legendItem}>
-                              <View style={[styles.legendDot, { backgroundColor: theme.colors.border }]} />
-                              <Text style={styles.legendText}>Absent</Text>
-                            </View>
-                          </View>
-                        </Card>
-                      );
-                    });
-                })()}
+                          </Card>
+                        );
+                      });
+                  })()}
 
-                {memberAttendance.length === 0 && (
-                  <Card style={styles.emptyStateCard}>
-                    <Calendar size={64} color={theme.colors.textSecondary} />
-                    <Text style={styles.emptyStateTitle}>No Attendance Records</Text>
-                    <Text style={styles.emptyStateText}>
-                      This member hasn't checked in yet
-                    </Text>
-                  </Card>
-                )}
-              </ScrollView>
-            </View>
-          </SafeAreaView>
+                  {memberAttendance.length === 0 && (
+                    <Card style={styles.emptyStateCard}>
+                      <Calendar size={64} color={theme.colors.textSecondary} />
+                      <Text style={styles.emptyStateTitle}>No Attendance Records</Text>
+                      <Text style={styles.emptyStateText}>
+                        This member hasn't checked in yet
+                      </Text>
+                    </Card>
+                  )}
+                </ScrollView>
+              </View>
+            </SafeAreaView>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* ==================== MEMBER DETAILS MODAL ==================== */}
@@ -3883,388 +4089,409 @@ ${gymName}`;
           presentationStyle="pageSheet"
           onRequestClose={() => setShowMemberDetails(false)}
         >
-          <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{selectedMember?.full_name}</Text>
-                <TouchableOpacity onPress={() => setShowMemberDetails(false)} style={styles.closeButton}>
-                  <X size={24} color={theme.colors.text} />
-                </TouchableOpacity>
-              </View>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          >
+            <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>{selectedMember?.full_name}</Text>
+                  <TouchableOpacity onPress={() => setShowMemberDetails(false)} style={styles.closeButton}>
+                    <X size={24} color={theme.colors.text} />
+                  </TouchableOpacity>
+                </View>
 
-              <ScrollView
-                style={styles.modalScrollView}
-                contentContainerStyle={styles.modalContent}
-                showsVerticalScrollIndicator={false}
-              >
-                {selectedMember && (
-                  <>
-                    {/* Member Overview - NO EMAIL/PHONE */}
-                    <Card style={styles.overviewCard}>
-                      <View style={styles.overviewHeader}>
-                        {/* Photo with Update Option */}
-                        <TouchableOpacity
-                          style={styles.memberAvatarLarge}
-                          onPress={() => updateMemberPhoto(selectedMember.id)}
-                          activeOpacity={0.7}
-                        >
-                          {selectedMember.profile_photo_url ? (
-                            <Image
-                              source={{ uri: selectedMember.profile_photo_url }}
-                              style={{ width: 64, height: 64, borderRadius: 32 }}
-                            />
-                          ) : (
-                            <User size={32} color="#ffffff" />
+                <ScrollView
+                  style={styles.modalScrollView}
+                  contentContainerStyle={styles.modalContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {selectedMember && (
+                    <>
+                      {/* Member Overview - UPDATED AVATAR WITH ANIMATION */}
+                      <Card style={styles.overviewCard}>
+                        <View style={styles.overviewHeader}>
+                          {/* Photo with Update Option and Loading Animation */}
+                          <TouchableOpacity
+                            style={styles.memberAvatarLarge}
+                            onPress={() => updateMemberPhoto(selectedMember.id)}
+                            activeOpacity={0.7}
+                            disabled={updatingPhoto}
+                          >
+                            {updatingPhoto ? (
+                              // ⭐ Upload Animation
+                              <View style={{
+                                width: 64,
+                                height: 64,
+                                borderRadius: 32,
+                                backgroundColor: theme.colors.primary + '20',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}>
+                                <ActivityIndicator size="small" color={theme.colors.card} />
+
+                              </View>
+                            ) : selectedMember.profile_photo_url ? (
+                              <Image
+                                source={{ uri: selectedMember.profile_photo_url }}
+                                style={{ width: 64, height: 64, borderRadius: 32 }}
+                              />
+                            ) : (
+                              <User size={32} color="#ffffff" />
+                            )}
+
+                            {/* Camera Icon Overlay - Only show when not uploading */}
+                            {!updatingPhoto && (
+                              <View style={styles.photoOverlay}>
+                                <Ionicons name="camera" size={16} color="#FFFFFF" />
+                              </View>
+                            )}
+                          </TouchableOpacity>
+
+                          <View style={styles.overviewInfo}>
+                            <Text style={styles.overviewName}>{selectedMember.full_name}</Text>
+                            <View style={styles.overviewStats}>
+                              <Text style={styles.overviewLevel}>Level {selectedMember.level}</Text>
+                              <Text style={styles.overviewPoints}>{selectedMember.total_points} XP</Text>
+                            </View>
+                            <View style={styles.overviewStats}>
+                              <Text style={styles.height}>
+                                Height: {selectedMember.height ? `${selectedMember.height} cm` : 'N/A'}
+                              </Text>
+                            </View>
+                            <View style={styles.overviewStats}>
+                              <Text style={styles.weight}>
+                                Weight: {selectedMember.weight ? `${selectedMember.weight} kg` : 'N/A'}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {selectedMember.batch && (
+                            <View style={styles.batchBadge}>
+                              <Text style={styles.batchBadgeText}>
+                                {selectedMember.batch === 'morning' && '🌅 '}
+                                {selectedMember.batch === 'evening' && '🌆 '}
+                                {selectedMember.batch === 'night' && '🌙 '}
+                                {selectedMember.batch.charAt(0).toUpperCase() + selectedMember.batch.slice(1)}
+                              </Text>
+                            </View>
                           )}
-                          {/* Camera Icon Overlay */}
-                          <View style={styles.photoOverlay}>
-                            <Ionicons name="camera" size={16} color="#FFFFFF" />
-                          </View>
-                        </TouchableOpacity>
-
-                        <View style={styles.overviewInfo}>
-                          <Text style={styles.overviewName}>{selectedMember.full_name}</Text>
-                          <View style={styles.overviewStats}>
-                            <Text style={styles.overviewLevel}>Level {selectedMember.level}</Text>
-                            <Text style={styles.overviewPoints}>{selectedMember.total_points} XP</Text>
-                          </View>
-                          <View style={styles.overviewStats}>
-                            <Text style={styles.height}>
-                              Height: {selectedMember.height ? `${selectedMember.height} cm` : 'N/A'}
-                            </Text>
-                          </View>
-                          <View style={styles.overviewStats}>
-                            <Text style={styles.weight}>
-                              Weight: {selectedMember.weight ? `${selectedMember.weight} kg` : 'N/A'}
-                            </Text>
-                          </View>
                         </View>
 
-                        {selectedMember.batch && (
-                          <View style={styles.batchBadge}>
-                            <Text style={styles.batchBadgeText}>
-                              {selectedMember.batch === 'morning' && '🌅 '}
-                              {selectedMember.batch === 'evening' && '🌆 '}
-                              {selectedMember.batch === 'night' && '🌙 '}
-                              {selectedMember.batch.charAt(0).toUpperCase() + selectedMember.batch.slice(1)}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
+                        {/* ⭐ REMOVED: Update Photo Button */}
 
-                      {/* Update Photo Button */}
-                      <Button
-                        title={updatingPhoto ? "Uploading..." : "Update Profile Photo"}
-                        onPress={() => updateMemberPhoto(selectedMember.id)}
-                        variant="primary"
-                        isLoading={updatingPhoto}
-                        style={{ marginTop: 12 }}
-                      />
+                        {/* Attendance Calendar Button */}
+                        <Button
+                          title="View Attendance Calendar"
+                          onPress={() => fetchMemberAttendance(selectedMember.id)}
+                          variant="outline"
+                          style={{ marginTop: 12 }}
+                        />
+                      </Card>
 
 
-                      {/* Attendance Calendar Button */}
-                      <Button
-                        title="View Attendance Calendar"
-                        onPress={() => fetchMemberAttendance(selectedMember.id)}
-                        variant="outline"
-                        style={{ marginTop: 12 }}
-                      />
-                    </Card>
+                      <InvoicesList userId={selectedMember.id} onRefresh={loadInvoices} />
 
-
-                    <InvoicesList userId={selectedMember.id} onRefresh={loadInvoices} />
-
-                    {/* Personal Training Toggle */}
-                    <Card style={styles.overviewCard}>
-                      <View style={styles.toggleContainer}>
-                        <Text style={styles.toggleLabel}>Personal Training</Text>
-                        <TouchableOpacity
-                          style={[
-                            styles.toggleSwitch,
-                            selectedMember.has_personal_training && styles.toggleSwitchActive,
-                          ]}
-                          onPress={async () => {
-                            try {
-                              const newValue = !selectedMember.has_personal_training;
-                              const { error } = await supabase
-                                .from('profiles')
-                                .update({ has_personal_training: newValue })
-                                .eq('id', selectedMember.id);
-
-                              if (error) throw error;
-
-                              if (newValue) {
-                                const { data: existing } = await supabase
-                                  .from('personal_training_assignments')
-                                  .select('id')
-                                  .eq('user_id', selectedMember.id)
-                                  .single();
-
-                                if (!existing && profile?.gym_id) {
-                                  await supabase.from('personal_training_assignments').insert([
-                                    {
-                                      user_id: selectedMember.id,
-                                      gym_id: profile.gym_id,
-                                      assigned_by: profile.id,
-                                      is_active: true,
-                                      start_date: customStartDate,
-                                    },
-                                  ]);
-                                }
-                              } else {
-                                await supabase
-                                  .from('personal_training_assignments')
-                                  .update({ is_active: false })
-                                  .eq('user_id', selectedMember.id);
-                              }
-
-                              setSelectedMember({
-                                ...selectedMember,
-                                has_personal_training: newValue,
-                              });
-                              Alert.alert('Success', `Personal training ${newValue ? 'enabled' : 'disabled'}`);
-                            } catch (error) {
-                              console.error('Error updating personal training:', error);
-                              Alert.alert('Error', 'Failed to update personal training status');
-                            }
-                          }}
-                        >
-                          <View
+                      {/* Personal Training Toggle */}
+                      <Card style={styles.overviewCard}>
+                        <View style={styles.toggleContainer}>
+                          <Text style={styles.toggleLabel}>Personal Training</Text>
+                          <TouchableOpacity
                             style={[
-                              styles.toggleThumb,
-                              selectedMember.has_personal_training && styles.toggleThumbActive,
+                              styles.toggleSwitch,
+                              selectedMember.has_personal_training && styles.toggleSwitchActive,
                             ]}
-                          />
-                        </TouchableOpacity>
-                      </View>
-                      <Text style={styles.helperText}>
-                        {selectedMember.has_personal_training
-                          ? 'Member has access to personal training diet plans'
-                          : 'Enable to provide custom diet plans for this member'}
-                      </Text>
-                    </Card>
+                            onPress={async () => {
+                              try {
+                                const newValue = !selectedMember.has_personal_training;
+                                const { error } = await supabase
+                                  .from('profiles')
+                                  .update({ has_personal_training: newValue })
+                                  .eq('id', selectedMember.id);
 
-                    {/* Subscription Details */}
-                    <Card style={styles.overviewCard}>
-                      <Text style={styles.sectionTitle}>Subscription Details</Text>
+                                if (error) throw error;
 
-                      {selectedMember.currentSubscription ? (
-                        <>
-                          <View style={{ gap: 12 }}>
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <Text style={styles.inputLabel}>Plan Name:</Text>
-                              <Text style={styles.overviewName}>
-                                {selectedMember.currentSubscription.subscription?.name || 'N/A'}
-                              </Text>
-                            </View>
+                                if (newValue) {
+                                  const { data: existing } = await supabase
+                                    .from('personal_training_assignments')
+                                    .select('id')
+                                    .eq('user_id', selectedMember.id)
+                                    .single();
 
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                              <Text style={styles.inputLabel}>Status:</Text>
-                              {selectedMember.subscriptionStatus === 'active' && (
-                                <View style={styles.activeBadge}>
-                                  <CheckCircle size={14} color={theme.colors.success} />
-                                  <Text style={styles.activeBadgeText}>Active</Text>
-                                </View>
-                              )}
-                              {selectedMember.subscriptionStatus === 'expired' && (
-                                <View style={styles.expiredBadge}>
-                                  <AlertCircle size={14} color={theme.colors.error} />
-                                  <Text style={styles.expiredBadgeText}>Expired</Text>
-                                </View>
-                              )}
-                            </View>
+                                  if (!existing && profile?.gym_id) {
+                                    await supabase.from('personal_training_assignments').insert([
+                                      {
+                                        user_id: selectedMember.id,
+                                        gym_id: profile.gym_id,
+                                        assigned_by: profile.id,
+                                        is_active: true,
+                                        start_date: customStartDate,
+                                      },
+                                    ]);
+                                  }
+                                } else {
+                                  await supabase
+                                    .from('personal_training_assignments')
+                                    .update({ is_active: false })
+                                    .eq('user_id', selectedMember.id);
+                                }
 
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                              <Text style={styles.inputLabel}>Start Date:</Text>
-                              <Text style={styles.subscriptionDate}>
-                                {new Date(selectedMember.currentSubscription.start_date).toLocaleDateString()}
-                              </Text>
-                            </View>
+                                setSelectedMember({
+                                  ...selectedMember,
+                                  has_personal_training: newValue,
+                                });
+                                Alert.alert('Success', `Personal training ${newValue ? 'enabled' : 'disabled'}`);
+                              } catch (error) {
+                                console.error('Error updating personal training:', error);
+                                Alert.alert('Error', 'Failed to update personal training status');
+                              }
+                            }}
+                          >
+                            <View
+                              style={[
+                                styles.toggleThumb,
+                                selectedMember.has_personal_training && styles.toggleThumbActive,
+                              ]}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                        <Text style={styles.helperText}>
+                          {selectedMember.has_personal_training
+                            ? 'Member has access to personal training diet plans'
+                            : 'Enable to provide custom diet plans for this member'}
+                        </Text>
+                      </Card>
 
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                              <Text style={styles.inputLabel}>End Date:</Text>
-                              <Text style={styles.subscriptionDate}>
-                                {new Date(selectedMember.currentSubscription.end_date).toLocaleDateString()}
-                              </Text>
-                            </View>
+                      {/* Subscription Details */}
+                      <Card style={styles.overviewCard}>
+                        <Text style={styles.sectionTitle}>Subscription Details</Text>
 
-                            <View style={{
-                              flexDirection: 'row',
-                              justifyContent: 'space-between',
-                              paddingVertical: 12,
-                              paddingHorizontal: 16,
-                              backgroundColor: selectedMember.subscriptionStatus === 'active'
-                                ? theme.colors.success + '20'
-                                : theme.colors.error + '20',
-                              borderRadius: 8,
-                            }}>
-                              <Text style={[styles.inputLabel, {
-                                color: selectedMember.subscriptionStatus === 'active'
-                                  ? theme.colors.success
-                                  : theme.colors.error,
-                                fontWeight: '700',
-                              }]}>
-                                {selectedMember.subscriptionStatus === 'active' ? 'Days Remaining:' : 'Days Expired:'}
-                              </Text>
-                              <Text style={[styles.overviewName, {
-                                color: selectedMember.subscriptionStatus === 'active'
-                                  ? theme.colors.success
-                                  : theme.colors.error,
-                                fontSize: 24,
-                              }]}>
-                                {Math.abs(calculateRemainingDays(selectedMember.currentSubscription.end_date))} days
-                              </Text>
-                            </View>
-
-                            <View style={styles.sectionDivider} />
-
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                              <Text style={styles.inputLabel}>Total Amount:</Text>
-                              <Text style={styles.paymentSummaryValue}>
-                                {formatRupees(selectedMember.currentSubscription.total_amount || selectedMember.currentSubscription.subscription?.price || 0)}
-                              </Text>
-                            </View>
-
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                              <Text style={styles.inputLabel}>Amount Paid:</Text>
-                              <Text style={[styles.paymentSummaryValue, { color: theme.colors.success }]}>
-                                {formatRupees(selectedMember.currentSubscription.paid_amount || 0)}
-                              </Text>
-                            </View>
-
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                              <Text style={styles.inputLabel}>Pending Amount:</Text>
-                              <Text style={[styles.paymentSummaryValue, { color: theme.colors.warning }]}>
-                                {formatRupees(selectedMember.currentSubscription.pending_amount || 0)}
-                              </Text>
-                            </View>
-                          </View>
-
-
-                          {/* Payment Actions - Pay Pending & Reminder */}
-                          {(selectedMember.currentSubscription.pending_amount || 0) > 0 && (
-                            <View style={{ gap: 12, marginTop: 16 }}>
-                              {/* Pay Pending Button */}
-                              <Button
-                                title={`Pay Pending ${formatRupees(selectedMember.currentSubscription.pending_amount)}`}
-                                onPress={() => {
-                                  setPendingPaymentAmount('');
-                                  setPendingReceiptNumber('');
-                                  setPendingPaymentNotes('');
-                                  setShowMemberDetails(false);
-                                  setTimeout(() => {
-                                    setShowPayPendingModal(true);
-                                  }, 300);
-                                }}
-                                variant="outline"
-                                style={{
-                                  borderColor: theme.colors.warning,
-                                  // backgroundColor: theme.colors.warning + '10',
-                                }}
-                                textStyle={{ color: theme.colors.warning }}
-                              />
-
-                              {/* Payment Reminder Button */}
-                              <TouchableOpacity
-                                style={{
-                                  flexDirection: 'row',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  paddingVertical: 14,
-                                  paddingHorizontal: 16,
-                                  borderRadius: 12,
-                                  borderWidth: 1.5,
-                                  borderColor: theme.colors.success,
-                                  backgroundColor: theme.colors.success + '10',
-                                  gap: 8,
-                                }}
-                                onPress={() => handleSendPaymentReminder(selectedMember)}
-                                activeOpacity={0.7}
-                                disabled={isLoading}
-                              >
-                                <Ionicons name="logo-whatsapp" size={20} color={theme.colors.success} />
-                                <Text style={{
-                                  fontSize: 15,
-                                  fontWeight: '600',
-                                  color: theme.colors.success,
-                                  fontFamily: 'Inter-SemiBold',
-                                }}>
-                                  Send Payment Reminder
+                        {selectedMember.currentSubscription ? (
+                          <>
+                            <View style={{ gap: 12 }}>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Text style={styles.inputLabel}>Plan Name:</Text>
+                                <Text style={styles.overviewName}>
+                                  {selectedMember.currentSubscription.subscription?.name || 'N/A'}
                                 </Text>
-                              </TouchableOpacity>
+                              </View>
+
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                <Text style={styles.inputLabel}>Status:</Text>
+                                {selectedMember.subscriptionStatus === 'active' && (
+                                  <View style={styles.activeBadge}>
+                                    <CheckCircle size={14} color={theme.colors.success} />
+                                    <Text style={styles.activeBadgeText}>Active</Text>
+                                  </View>
+                                )}
+                                {selectedMember.subscriptionStatus === 'expired' && (
+                                  <View style={styles.expiredBadge}>
+                                    <AlertCircle size={14} color={theme.colors.error} />
+                                    <Text style={styles.expiredBadgeText}>Expired</Text>
+                                  </View>
+                                )}
+                              </View>
+
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                <Text style={styles.inputLabel}>Start Date:</Text>
+                                <Text style={styles.subscriptionDate}>
+                                  {new Date(selectedMember.currentSubscription.start_date).toLocaleDateString()}
+                                </Text>
+                              </View>
+
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                <Text style={styles.inputLabel}>End Date:</Text>
+                                <Text style={styles.subscriptionDate}>
+                                  {new Date(selectedMember.currentSubscription.end_date).toLocaleDateString()}
+                                </Text>
+                              </View>
+
+                              <View style={{
+                                flexDirection: 'row',
+                                justifyContent: 'space-between',
+                                paddingVertical: 12,
+                                paddingHorizontal: 16,
+                                backgroundColor: selectedMember.subscriptionStatus === 'active'
+                                  ? theme.colors.success + '20'
+                                  : theme.colors.error + '20',
+                                borderRadius: 8,
+                              }}>
+                                <Text style={[styles.inputLabel, {
+                                  color: selectedMember.subscriptionStatus === 'active'
+                                    ? theme.colors.success
+                                    : theme.colors.error,
+                                  fontWeight: '700',
+                                }]}>
+                                  {selectedMember.subscriptionStatus === 'active' ? 'Days Remaining:' : 'Days Expired:'}
+                                </Text>
+                                <Text style={[styles.overviewName, {
+                                  color: selectedMember.subscriptionStatus === 'active'
+                                    ? theme.colors.success
+                                    : theme.colors.error,
+                                  fontSize: 24,
+                                }]}>
+                                  {Math.abs(calculateRemainingDays(selectedMember.currentSubscription.end_date))} days
+                                </Text>
+                              </View>
+
+                              <View style={styles.sectionDivider} />
+
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                <Text style={styles.inputLabel}>Total Amount:</Text>
+                                <Text style={styles.paymentSummaryValue}>
+                                  {formatRupees(selectedMember.currentSubscription.total_amount || selectedMember.currentSubscription.subscription?.price || 0)}
+                                </Text>
+                              </View>
+
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                <Text style={styles.inputLabel}>Amount Paid:</Text>
+                                <Text style={[styles.paymentSummaryValue, { color: theme.colors.success }]}>
+                                  {formatRupees(selectedMember.currentSubscription.paid_amount || 0)}
+                                </Text>
+                              </View>
+
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                <Text style={styles.inputLabel}>Pending Amount:</Text>
+                                <Text style={[styles.paymentSummaryValue, { color: theme.colors.warning }]}>
+                                  {formatRupees(selectedMember.currentSubscription.pending_amount || 0)}
+                                </Text>
+                              </View>
                             </View>
-                          )}
-                          <Button
-                            title="Renew Subscription"
-                            onPress={() => {
-                              setShowRenewModal(true);
-                              setRenewSubscription(null);
-                              setRenewAmountReceived('');
-                              setRenewPaymentMethod('cash');
-                            }}
-                            style={{ marginTop: 12 }}
-                          />
-                        </>
-                      ) : (
-                        <>
-                          <Text style={styles.noDataText}>No active subscription</Text>
-                          <Button
-                            title="Add Subscription"
-                            onPress={() => {
-                              setShowRenewModal(true);
-                              setRenewSubscription(null);
-                              setRenewAmountReceived('');
-                              setRenewPaymentMethod('cash');
-                            }}
-                            style={{ marginTop: 12 }}
-                          />
-                        </>
-                      )}
-                    </Card>
 
-                    {/* Stats Cards */}
-                    <View style={styles.statsGrid}>
-                      <Card style={styles.statCard}>
-                        <Activity size={24} color={theme.colors.primary} />
-                        <Text style={styles.statValue}>{selectedMember.stats?.totalWorkouts || 0}</Text>
-                        <Text style={styles.statLabel}>Total Workouts</Text>
-                      </Card>
-                      <Card style={styles.statCard}>
-                        <Flame size={24} color={theme.colors.error} />
-                        <Text style={styles.statValue}>{selectedMember.stats?.totalCaloriesBurned || 0}</Text>
-                        <Text style={styles.statLabel}>Calories Burned</Text>
-                      </Card>
-                      <Card style={styles.statCard}>
-                        <Clock size={24} color={theme.colors.success} />
-                        <Text style={styles.statValue}>{selectedMember.stats?.totalMinutes || 0}</Text>
-                        <Text style={styles.statLabel}>Total Minutes</Text>
-                      </Card>
-                      <Card style={styles.statCard}>
-                        <UtensilsCrossed size={24} color={theme.colors.warning} />
-                        <Text style={styles.statValue}>{selectedMember.stats?.totalMeals || 0}</Text>
-                        <Text style={styles.statLabel}>Meals Logged</Text>
-                      </Card>
-                    </View>
 
-                    {/* Danger Zone */}
-                    <Card style={styles.dangerCard}>
-                      <Text style={styles.dangerTitle}>Danger Zone</Text>
-                      <Text style={styles.dangerSubtitle}>
-                        Permanently delete this member and all their data
-                      </Text>
-                      <Button
-                        title="Delete Member"
-                        onPress={() => deleteMember(selectedMember.id, selectedMember.full_name)}
-                        variant="outline"
-                        style={styles.deleteButton}
-                        textStyle={styles.deleteButtonText}
-                      />
-                    </Card>
-                  </>
-                )}
-              </ScrollView>
-            </View>
-          </SafeAreaView>
+                            {/* Payment Actions - Pay Pending & Reminder */}
+                            {(selectedMember.currentSubscription.pending_amount || 0) > 0 && (
+                              <View style={{ gap: 12, marginTop: 16 }}>
+                                {/* Pay Pending Button */}
+                                <Button
+                                  title={`Pay Pending ${formatRupees(selectedMember.currentSubscription.pending_amount)}`}
+                                  onPress={() => {
+                                    setPendingPaymentAmount('');
+                                    setPendingReceiptNumber('');
+                                    setPendingPaymentNotes('');
+                                    setShowMemberDetails(false);
+                                    setTimeout(() => {
+                                      setShowPayPendingModal(true);
+                                    }, 300);
+                                  }}
+                                  variant="outline"
+                                  style={{
+                                    borderColor: theme.colors.warning,
+                                    // backgroundColor: theme.colors.warning + '10',
+                                  }}
+                                  textStyle={{ color: theme.colors.warning }}
+                                />
+
+                                {/* Payment Reminder Button */}
+                                <TouchableOpacity
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 14,
+                                    paddingHorizontal: 16,
+                                    borderRadius: 12,
+                                    borderWidth: 1.5,
+                                    borderColor: theme.colors.success,
+                                    backgroundColor: theme.colors.success + '10',
+                                    gap: 8,
+                                  }}
+                                  onPress={() => handleSendPaymentReminder(selectedMember)}
+                                  activeOpacity={0.7}
+                                  disabled={isLoading}
+                                >
+                                  <Ionicons name="logo-whatsapp" size={20} color={theme.colors.success} />
+                                  <Text style={{
+                                    fontSize: 15,
+                                    fontWeight: '600',
+                                    color: theme.colors.success,
+                                    fontFamily: 'Inter-SemiBold',
+                                  }}>
+                                    Send Payment Reminder
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            )}
+                            <Button
+                              title="Renew Subscription"
+                              onPress={() => {
+                                setShowRenewModal(true);
+                                setRenewSubscription(null);
+                                setRenewAmountReceived('');
+                                setRenewPaymentMethod('cash');
+                                setDiscountAmount(''); // ⭐ Reset discount
+                                setRenewReceiptNumber('');
+                                setRenewPaymentNotes('');
+                              }}
+                              style={{ marginTop: 12 }}
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <Text style={styles.noDataText}>No active subscription</Text>
+                            <Button
+                              title="Add Subscription"
+                              onPress={() => {
+                                setShowRenewModal(true);
+                                setRenewSubscription(null);
+                                setRenewAmountReceived('');
+                                setRenewPaymentMethod('cash');
+                                setDiscountAmount(''); // ⭐ Reset discount
+                                setRenewReceiptNumber('');
+                                setRenewPaymentNotes('');
+                              }}
+                              style={{ marginTop: 12 }}
+                            />
+                          </>
+                        )}
+                      </Card>
+
+                      {/* Stats Cards */}
+                      <View style={styles.statsGrid}>
+                        <Card style={styles.statCard}>
+                          <Activity size={24} color={theme.colors.primary} />
+                          <Text style={styles.statValue}>{selectedMember.stats?.totalWorkouts || 0}</Text>
+                          <Text style={styles.statLabel}>Total Workouts</Text>
+                        </Card>
+                        <Card style={styles.statCard}>
+                          <Flame size={24} color={theme.colors.error} />
+                          <Text style={styles.statValue}>{selectedMember.stats?.totalCaloriesBurned || 0}</Text>
+                          <Text style={styles.statLabel}>Calories Burned</Text>
+                        </Card>
+                        <Card style={styles.statCard}>
+                          <Clock size={24} color={theme.colors.success} />
+                          <Text style={styles.statValue}>{selectedMember.stats?.totalMinutes || 0}</Text>
+                          <Text style={styles.statLabel}>Total Minutes</Text>
+                        </Card>
+                        <Card style={styles.statCard}>
+                          <UtensilsCrossed size={24} color={theme.colors.warning} />
+                          <Text style={styles.statValue}>{selectedMember.stats?.totalMeals || 0}</Text>
+                          <Text style={styles.statLabel}>Meals Logged</Text>
+                        </Card>
+                      </View>
+
+                      {/* Danger Zone */}
+                      <Card style={styles.dangerCard}>
+                        <Text style={styles.dangerTitle}>Danger Zone</Text>
+                        <Text style={styles.dangerSubtitle}>
+                          Permanently delete this member and all their data
+                        </Text>
+                        <Button
+                          title="Delete Member"
+                          onPress={() => deleteMember(selectedMember.id, selectedMember.full_name)}
+                          variant="outline"
+                          style={styles.deleteButton}
+                          textStyle={styles.deleteButtonText}
+                        />
+                      </Card>
+                    </>
+                  )}
+                </ScrollView>
+              </View>
+            </SafeAreaView>
+          </KeyboardAvoidingView>
         </Modal>
 
 
@@ -4275,242 +4502,334 @@ ${gymName}`;
           presentationStyle="pageSheet"
           onRequestClose={() => setShowRenewModal(false)}
         >
-          <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>
-                  {selectedMember?.currentSubscription ? 'Renew Subscription' : 'Add Subscription'}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setShowRenewModal(false)}
-                  style={styles.closeButton}
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          >
+            <SafeAreaView style={styles.modalSafeArea} edges={['top', 'bottom']}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>
+                    {selectedMember?.currentSubscription ? 'Renew Subscription' : 'Add Subscription'}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setShowRenewModal(false)}
+                    style={styles.closeButton}
+                  >
+                    <X size={24} color={theme.colors.text} />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView
+                  style={styles.modalScrollView}
+                  contentContainerStyle={styles.modalContent}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
                 >
-                  <X size={24} color={theme.colors.text} />
-                </TouchableOpacity>
-              </View>
+                  <Text style={styles.helperText}>
+                    Select a new subscription plan for {selectedMember?.full_name}
+                  </Text>
 
-              <ScrollView
-                style={styles.modalScrollView}
-                contentContainerStyle={styles.modalContent}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-              >
-                <Text style={styles.helperText}>
-                  Select a new subscription plan for {selectedMember?.full_name}
-                </Text>
+                  <View style={styles.sectionDivider} />
 
-                <View style={styles.sectionDivider} />
-
-                {availableSubscriptions.length > 0 ? (
-                  <>
-                    <Text style={styles.inputLabel}>Select Plan *</Text>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.subscriptionScroll}
-                    >
-                      {availableSubscriptions.map((sub) => (
-                        <TouchableOpacity
-                          key={sub.id}
-                          style={[
-                            styles.subscriptionOption,
-                            renewSubscription?.id === sub.id && styles.subscriptionOptionSelected,
-                          ]}
-                          onPress={() => {
-                            setRenewSubscription(sub);
-                            setRenewAmountReceived('');
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[
-                            styles.subscriptionName,
-                            renewSubscription?.id === sub.id && styles.subscriptionNameSelected,
-                          ]}>
-                            {sub.name}
-                          </Text>
-                          <Text style={[
-                            styles.subscriptionPrice,
-                            renewSubscription?.id === sub.id && styles.subscriptionPriceSelected,
-                          ]}>
-                            ₹{sub.price}
-                          </Text>
-                          <Text style={[
-                            styles.subscriptionDuration,
-                            renewSubscription?.id === sub.id && styles.subscriptionDurationSelected,
-                          ]}>
-                            {sub.duration_months} month{sub.duration_months > 1 ? 's' : ''}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-
-                    {renewSubscription && (
-                      <>
-                        <Text style={styles.inputLabel}>Payment Method</Text>
-                        <View style={styles.paymentMethodRow}>
+                  {availableSubscriptions.length > 0 ? (
+                    <>
+                      <Text style={styles.inputLabel}>Select Plan *</Text>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.subscriptionScroll}
+                      >
+                        {availableSubscriptions.map((sub) => (
                           <TouchableOpacity
+                            key={sub.id}
                             style={[
-                              styles.paymentMethodOption,
-                              renewPaymentMethod === 'cash' && styles.paymentMethodOptionSelected,
+                              styles.subscriptionOption,
+                              renewSubscription?.id === sub.id && styles.subscriptionOptionSelected,
                             ]}
-                            onPress={() => setRenewPaymentMethod('cash')}
+                            onPress={() => {
+                              setRenewSubscription(sub);
+                              setRenewAmountReceived('');
+                            }}
                             activeOpacity={0.7}
                           >
-                            <DollarSign size={20} color={renewPaymentMethod === 'cash' ? '#FFFFFF' : theme.colors.textSecondary} />
                             <Text style={[
-                              styles.paymentMethodText,
-                              renewPaymentMethod === 'cash' && styles.paymentMethodTextSelected,
+                              styles.subscriptionName,
+                              renewSubscription?.id === sub.id && styles.subscriptionNameSelected,
                             ]}>
-                              Cash
+                              {sub.name}
+                            </Text>
+                            <Text style={[
+                              styles.subscriptionPrice,
+                              renewSubscription?.id === sub.id && styles.subscriptionPriceSelected,
+                            ]}>
+                              ₹{sub.price}
+                            </Text>
+                            <Text style={[
+                              styles.subscriptionDuration,
+                              renewSubscription?.id === sub.id && styles.subscriptionDurationSelected,
+                            ]}>
+                              {sub.duration_months} month{sub.duration_months > 1 ? 's' : ''}
                             </Text>
                           </TouchableOpacity>
+                        ))}
+                      </ScrollView>
 
-                          <TouchableOpacity
-                            style={[
-                              styles.paymentMethodOption,
-                              renewPaymentMethod === 'online' && styles.paymentMethodOptionSelected,
-                            ]}
-                            onPress={() => setRenewPaymentMethod('online')}
-                            activeOpacity={0.7}
-                          >
-                            <CreditCard size={20} color={renewPaymentMethod === 'online' ? '#FFFFFF' : theme.colors.textSecondary} />
-                            <Text style={[
-                              styles.paymentMethodText,
-                              renewPaymentMethod === 'online' && styles.paymentMethodTextSelected,
-                            ]}>
-                              Online
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-
-                        {/* Payment Fields (Same for both Cash and Online) */}
+                      {renewSubscription && (
                         <>
                           <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Plan Amount</Text>
-                            <TextInput
-                              style={[styles.input, styles.inputReadonly]}
-                              value={`₹${renewSubscription.price}`}
-                              editable={false}
-                            />
-                          </View>
-
-                          <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Amount Received *</Text>
-                            <TextInput
-                              style={styles.input}
-                              placeholder="Enter amount received"
-                              placeholderTextColor={theme.colors.textSecondary}
-                              value={renewAmountReceived}
-                              onChangeText={setRenewAmountReceived}
-                              keyboardType="decimal-pad"
-                            />
+                            <Text style={styles.inputLabel}>Subscription Start Date</Text>
+                            <TouchableOpacity
+                              style={[styles.input, styles.datePickerButton]}
+                              onPress={() => setShowDatePicker(true)}
+                              activeOpacity={0.7}
+                            >
+                              <View style={styles.datePickerContent}>
+                                <Calendar size={20} color={theme.colors.textSecondary} />
+                                <Text style={styles.datePickerText}>
+                                  {new Date(customStartDate + 'T12:00:00').toLocaleDateString('en-IN', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric'
+                                  })}
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
                             <Text style={styles.helperText}>
-                              Enter the amount customer paid (can be partial)
+                              Set subscription start date (default is today)
                             </Text>
                           </View>
 
-                          <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Pending Amount</Text>
-                            <TextInput
-                              style={[styles.input, styles.inputReadonly]}
-                              value={`₹${Math.max(0, renewSubscription.price - (parseFloat(renewAmountReceived) || 0)).toFixed(2)}`}
-                              editable={false}
-                            />
+                          <Text style={styles.inputLabel}>Payment Method</Text>
+                          <View style={styles.paymentMethodRow}>
+                            <TouchableOpacity
+                              style={[
+                                styles.paymentMethodOption,
+                                renewPaymentMethod === 'cash' && styles.paymentMethodOptionSelected,
+                              ]}
+                              onPress={() => setRenewPaymentMethod('cash')}
+                              activeOpacity={0.7}
+                            >
+                              <DollarSign size={20} color={renewPaymentMethod === 'cash' ? '#FFFFFF' : theme.colors.textSecondary} />
+                              <Text style={[
+                                styles.paymentMethodText,
+                                renewPaymentMethod === 'cash' && styles.paymentMethodTextSelected,
+                              ]}>
+                                Cash
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={[
+                                styles.paymentMethodOption,
+                                renewPaymentMethod === 'online' && styles.paymentMethodOptionSelected,
+                              ]}
+                              onPress={() => setRenewPaymentMethod('online')}
+                              activeOpacity={0.7}
+                            >
+                              <CreditCard size={20} color={renewPaymentMethod === 'online' ? '#FFFFFF' : theme.colors.textSecondary} />
+                              <Text style={[
+                                styles.paymentMethodText,
+                                renewPaymentMethod === 'online' && styles.paymentMethodTextSelected,
+                              ]}>
+                                Online
+                              </Text>
+                            </TouchableOpacity>
                           </View>
 
-                          {/* Payment Summary */}
-                          <View style={styles.paymentSummary}>
-                            <View style={styles.paymentSummaryRow}>
-                              <Text style={styles.paymentSummaryLabel}>Plan Amount:</Text>
-                              <Text style={styles.paymentSummaryValue}>₹{renewSubscription.price}</Text>
+                          {/* Payment Fields */}
+                          <>
+                            <View style={styles.inputGroup}>
+                              <Text style={styles.inputLabel}>Plan Amount</Text>
+                              <TextInput
+                                style={[styles.input, styles.inputReadonly]}
+                                value={`₹${renewSubscription.price}`}
+                                editable={false}
+                              />
                             </View>
-                            <View style={styles.paymentSummaryRow}>
-                              <Text style={styles.paymentSummaryLabel}>Amount Received:</Text>
-                              <Text style={styles.paymentSummaryValue}>
-                                ₹{renewAmountReceived ? parseFloat(renewAmountReceived).toFixed(2) : '0.00'}
+
+                            <View style={styles.inputGroup}>
+                              <Text style={styles.inputLabel}>Discount Amount (Optional)</Text>
+                              <TextInput
+                                style={styles.input}
+                                placeholder="Enter discount amount"
+                                placeholderTextColor={theme.colors.textSecondary}
+                                value={discountAmount}
+                                onChangeText={setDiscountAmount}
+                                keyboardType="decimal-pad"
+                              />
+                              <Text style={styles.helperText}>
+                                Enter discount amount to reduce from total
                               </Text>
                             </View>
-                            <View style={[styles.paymentSummaryRow, styles.paymentSummaryTotal]}>
-                              <Text style={styles.paymentSummaryTotalLabel}>Pending Amount:</Text>
-                              <View style={{ alignItems: 'flex-end', gap: 8 }}>
-                                <Text style={styles.paymentSummaryTotalValue}>
-                                  ₹{Math.max(0, renewSubscription.price - (parseFloat(renewAmountReceived) || 0)).toFixed(2)}
+
+                            {/* Price Breakdown with Discount */}
+                            <View style={styles.priceBreakdown}>
+                              <View style={styles.breakdownRow}>
+                                <Text style={styles.breakdownLabel}>Plan Price:</Text>
+                                <Text style={styles.breakdownValue}>₹{renewSubscription.price}</Text>
+                              </View>
+                              {discountAmount && parseFloat(discountAmount) > 0 && (
+                                <View style={styles.breakdownRow}>
+                                  <Text style={[styles.breakdownLabel, { color: theme.colors.success }]}>
+                                    Discount:
+                                  </Text>
+                                  <Text style={[styles.breakdownValue, { color: theme.colors.success }]}>
+                                    - ₹{discountAmount}
+                                  </Text>
+                                </View>
+                              )}
+                              <View style={[styles.breakdownRow, styles.breakdownTotal]}>
+                                <Text style={styles.breakdownTotalLabel}>Final Amount:</Text>
+                                <Text style={styles.breakdownTotalValue}>
+                                  ₹{Math.max(0, renewSubscription.price - (parseFloat(discountAmount) || 0)).toFixed(2)}
                                 </Text>
-                                <View style={[
-                                  styles.paymentStatusBadge,
-                                  Math.max(0, renewSubscription.price - (parseFloat(renewAmountReceived) || 0)) === 0
-                                    ? styles.paymentStatusBadgeComplete
-                                    : styles.paymentStatusBadgePartial,
-                                ]}>
-                                  {Math.max(0, renewSubscription.price - (parseFloat(renewAmountReceived) || 0)) === 0 ? (
-                                    <>
-                                      <CheckCircle size={14} color={theme.colors.success} />
-                                      <Text style={[styles.paymentStatusText, styles.paymentStatusTextComplete]}>
-                                        Fully Paid
-                                      </Text>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <AlertCircle size={14} color={theme.colors.warning} />
-                                      <Text style={[styles.paymentStatusText, styles.paymentStatusTextPartial]}>
-                                        Partial Payment
-                                      </Text>
-                                    </>
-                                  )}
+                              </View>
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                              <Text style={styles.inputLabel}>Amount Received *</Text>
+                              <TextInput
+                                style={styles.input}
+                                placeholder="Enter amount received"
+                                placeholderTextColor={theme.colors.textSecondary}
+                                value={renewAmountReceived}
+                                onChangeText={setRenewAmountReceived}
+                                keyboardType="decimal-pad"
+                              />
+                              <Text style={styles.helperText}>
+                                Enter the amount customer paid (can be partial)
+                              </Text>
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                              <Text style={styles.inputLabel}>Remaining Amount</Text>
+                              <TextInput
+                                style={[styles.input, styles.inputReadonly]}
+                                value={`₹${Math.max(0,
+                                  (renewSubscription.price - (parseFloat(discountAmount) || 0)) - (parseFloat(renewAmountReceived) || 0)
+                                ).toFixed(2)}`}
+                                editable={false}
+                              />
+                            </View>
+
+                            {/* Payment Summary */}
+                            <View style={styles.paymentSummary}>
+                              <View style={styles.paymentSummaryRow}>
+                                <Text style={styles.paymentSummaryLabel}>Plan Amount:</Text>
+                                <Text style={styles.paymentSummaryValue}>₹{renewSubscription.price}</Text>
+                              </View>
+                              {discountAmount && parseFloat(discountAmount) > 0 && (
+                                <View style={styles.paymentSummaryRow}>
+                                  <Text style={[styles.paymentSummaryLabel, { color: theme.colors.success }]}>
+                                    Discount:
+                                  </Text>
+                                  <Text style={[styles.paymentSummaryValue, { color: theme.colors.success }]}>
+                                    - ₹{parseFloat(discountAmount).toFixed(2)}
+                                  </Text>
+                                </View>
+                              )}
+                              <View style={styles.paymentSummaryRow}>
+                                <Text style={styles.paymentSummaryLabel}>Final Amount:</Text>
+                                <Text style={[styles.paymentSummaryValue, { fontWeight: '700' }]}>
+                                  ₹{Math.max(0, renewSubscription.price - (parseFloat(discountAmount) || 0)).toFixed(2)}
+                                </Text>
+                              </View>
+                              <View style={styles.paymentSummaryRow}>
+                                <Text style={styles.paymentSummaryLabel}>Amount Received:</Text>
+                                <Text style={styles.paymentSummaryValue}>
+                                  ₹{renewAmountReceived ? parseFloat(renewAmountReceived).toFixed(2) : '0.00'}
+                                </Text>
+                              </View>
+                              <View style={[styles.paymentSummaryRow, styles.paymentSummaryTotal]}>
+                                <Text style={styles.paymentSummaryTotalLabel}>Pending Amount:</Text>
+                                <View style={{ alignItems: 'flex-end', gap: 8 }}>
+                                  <Text style={styles.paymentSummaryTotalValue}>
+                                    ₹{Math.max(0,
+                                      (renewSubscription.price - (parseFloat(discountAmount) || 0)) - (parseFloat(renewAmountReceived) || 0)
+                                    ).toFixed(2)}
+                                  </Text>
+                                  <View style={[
+                                    styles.paymentStatusBadge,
+                                    Math.max(0,
+                                      (renewSubscription.price - (parseFloat(discountAmount) || 0)) - (parseFloat(renewAmountReceived) || 0)
+                                    ) === 0
+                                      ? styles.paymentStatusBadgeComplete
+                                      : styles.paymentStatusBadgePartial,
+                                  ]}>
+                                    {Math.max(0,
+                                      (renewSubscription.price - (parseFloat(discountAmount) || 0)) - (parseFloat(renewAmountReceived) || 0)
+                                    ) === 0 ? (
+                                      <>
+                                        <CheckCircle size={14} color={theme.colors.success} />
+                                        <Text style={[styles.paymentStatusText, styles.paymentStatusTextComplete]}>
+                                          Fully Paid
+                                        </Text>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <AlertCircle size={14} color={theme.colors.warning} />
+                                        <Text style={[styles.paymentStatusText, styles.paymentStatusTextPartial]}>
+                                          Partial Payment
+                                        </Text>
+                                      </>
+                                    )}
+                                  </View>
                                 </View>
                               </View>
                             </View>
-                          </View>
 
-                          <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Receipt Number (Optional)</Text>
-                            <TextInput
-                              style={styles.input}
-                              placeholder="Auto-generated if left blank"
-                              placeholderTextColor={theme.colors.textSecondary}
-                              value={renewReceiptNumber}
-                              onChangeText={setRenewReceiptNumber}
-                            />
-                          </View>
+                            <View style={styles.inputGroup}>
+                              <Text style={styles.inputLabel}>Receipt Number (Optional)</Text>
+                              <TextInput
+                                style={styles.input}
+                                placeholder="Auto-generated if left blank"
+                                placeholderTextColor={theme.colors.textSecondary}
+                                value={renewReceiptNumber}
+                                onChangeText={setRenewReceiptNumber}
+                              />
+                            </View>
 
-                          <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Payment Notes (Optional)</Text>
-                            <TextInput
-                              style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
-                              placeholder="Add any notes about this payment..."
-                              placeholderTextColor={theme.colors.textSecondary}
-                              value={renewPaymentNotes}
-                              onChangeText={setRenewPaymentNotes}
-                              multiline
-                              numberOfLines={3}
-                            />
-                          </View>
+                            <View style={styles.inputGroup}>
+                              <Text style={styles.inputLabel}>Payment Notes (Optional)</Text>
+                              <TextInput
+                                style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
+                                placeholder="Add any notes about this payment..."
+                                placeholderTextColor={theme.colors.textSecondary}
+                                value={renewPaymentNotes}
+                                onChangeText={setRenewPaymentNotes}
+                                multiline
+                                numberOfLines={3}
+                              />
+                            </View>
 
-                          {renewPaymentMethod === 'online' && (
-                            <Text style={styles.helperText}>
-                              💡 Member paid online. Amount will be recorded for tracking.
-                            </Text>
-                          )}
+                            {renewPaymentMethod === 'online' && (
+                              <Text style={styles.helperText}>
+                                💡 Member paid online. Amount will be recorded for tracking.
+                              </Text>
+                            )}
+                          </>
                         </>
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <Text style={styles.helperText}>
-                    No subscription plans available. Create plans in Subscriptions section.
-                  </Text>
-                )}
+                      )}
+                    </>
+                  ) : (
+                    <Text style={styles.helperText}>
+                      No subscription plans available. Create plans in Subscriptions section.
+                    </Text>
+                  )}
 
-                <Button
-                  title={selectedMember?.currentSubscription ? 'Renew Subscription' : 'Add Subscription'}
-                  onPress={renewMemberSubscription}
-                  isLoading={isLoading}
-                  disabled={!renewSubscription}
-                  style={styles.addButton}
-                />
-              </ScrollView>
-            </View>
-          </SafeAreaView>
+                  <Button
+                    title={selectedMember?.currentSubscription ? 'Renew Subscription' : 'Add Subscription'}
+                    onPress={renewMemberSubscription}
+                    isLoading={isLoading}
+                    disabled={!renewSubscription}
+                    style={styles.addButton}
+                  />
+                </ScrollView>
+              </View>
+            </SafeAreaView>
+          </KeyboardAvoidingView>
         </Modal>
       </Animated.View>
     </SafeAreaView>

@@ -8,7 +8,6 @@ import {
   Platform,
   Image,
 } from 'react-native';
-import { Dumbbell } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import * as SplashScreen from 'expo-splash-screen';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -22,7 +21,6 @@ interface SplashScreenProps {
   gymId?: string;
 }
 
-// Keep native splash visible until we're ready
 SplashScreen.preventAutoHideAsync();
 
 export default function AnimatedSplashScreen({ onFinish, userId, gymId }: SplashScreenProps) {
@@ -93,7 +91,6 @@ export default function AnimatedSplashScreen({ onFinish, userId, gymId }: Splash
     } catch (error) {
       console.log('Splash: Could not load gym data');
     } finally {
-      // Minimum splash duration for smooth experience
       setTimeout(() => {
         setIsLoading(false);
         SplashScreen.hideAsync();
@@ -206,46 +203,37 @@ export default function AnimatedSplashScreen({ onFinish, userId, gymId }: Splash
       justifyContent: 'center',
       marginBottom: 40,
     },
-    gymLogoWrapper: {
-      width: 160,
-      height: 160,
-      borderRadius: 80,
-      backgroundColor: theme.colors.primary + '20',
+    logoWrapper: {
+      width: 150,
+      height: 150,
+      borderRadius: 75,
+      backgroundColor: theme.colors.card,
       alignItems: 'center',
       justifyContent: 'center',
-      padding: 20,
-      borderWidth: 3,
-      borderColor: theme.colors.primary + '40',
       shadowColor: theme.colors.primary,
       shadowOffset: { width: 0, height: 8 },
       shadowOpacity: 0.3,
       shadowRadius: 16,
       elevation: 10,
+      borderWidth: 3,
+      borderColor: theme.colors.primary + '40',
+    },
+    logoImageContainer: {
+      width: 130,
+      height: 130,
+      borderRadius: 65,
+      overflow: 'hidden',
+      backgroundColor: '#ffffff',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     gymLogo: {
       width: '100%',
       height: '100%',
-      borderRadius: 70,
     },
-    defaultgymLogo: {
-      width: '100%',
-      height: '100%',
-      borderRadius: 100,
-    },
-    defaultLogoWrapper: {
-      width: 160,
-      height: 160,
-      borderRadius: 80,
-      backgroundColor: theme.colors.primary + '20',
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 3,
-      borderColor: theme.colors.primary + '40',
-      shadowColor: theme.colors.primary,
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.3,
-      shadowRadius: 16,
-      elevation: 10,
+    defaultLogo: {
+      width: '85%',
+      height: '85%',
     },
     textContainer: {
       alignItems: 'center',
@@ -330,23 +318,23 @@ export default function AnimatedSplashScreen({ onFinish, userId, gymId }: Splash
           },
         ]}
       >
-        {gymData?.logo_url ? (
-          <View style={styles.gymLogoWrapper}>
-            <Image
-              source={{ uri: gymData.logo_url }}
-              style={styles.gymLogo}
-              resizeMode="contain"
-            />
+        <View style={styles.logoWrapper}>
+          <View style={styles.logoImageContainer}>
+            {gymData?.logo_url ? (
+              <Image
+                source={{ uri: gymData.logo_url }}
+                style={styles.gymLogo}
+                resizeMode="cover"
+              />
+            ) : (
+              <Image
+                source={logo}
+                style={styles.defaultLogo}
+                resizeMode="contain"
+              />
+            )}
           </View>
-        ) : (
-          <View style={styles.defaultLogoWrapper}>
-            <Image
-              source={logo}
-              style={styles.defaultgymLogo}
-              resizeMode="contain"
-            />
-          </View>
-        )}
+        </View>
       </Animated.View>
 
       {/* App/Gym Name */}
