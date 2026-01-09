@@ -203,38 +203,44 @@ export default function AnimatedSplashScreen({ onFinish, userId, gymId }: Splash
       justifyContent: 'center',
       marginBottom: 40,
     },
-    logoWrapper: {
-      width: 150,
-      height: 150,
-      borderRadius: 75,
-      backgroundColor: theme.colors.card,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: theme.colors.primary,
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.3,
-      shadowRadius: 16,
-      elevation: 10,
-      borderWidth: 3,
-      borderColor: theme.colors.primary + '40',
-    },
-    logoImageContainer: {
-      width: 130,
-      height: 130,
-      borderRadius: 65,
-      overflow: 'hidden',
-      backgroundColor: '#ffffff',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    gymLogo: {
-      width: '100%',
-      height: '100%',
-    },
-    defaultLogo: {
-      width: '85%',
-      height: '85%',
-    },
+   // Replace the logoWrapper and logoImageContainer styles with these:
+// Replace the logoWrapper and logoImageContainer styles with these:
+
+logoWrapper: {
+  width: 140,
+  height: 140,
+  borderRadius: 75,
+  backgroundColor: theme.colors.card,
+  alignItems: 'center',
+  justifyContent: 'center',
+  shadowColor: theme.colors.primary,
+  shadowOffset: { width: 0, height: 8 },
+  shadowOpacity: 0.3,
+  shadowRadius: 16,
+  elevation: 10,
+  borderWidth: 3,
+  borderColor: theme.colors.primary + '40',
+  overflow: 'hidden',
+},
+logoImageContainer: {
+  width: 122,
+  height: 122,
+  borderRadius: 100, // ⭐ Circular
+  overflow: 'hidden', // ⭐ CRITICAL - clips to circle
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#ffffff',
+},
+gymLogo: {
+  width: '100%',
+  height: '100%',
+  borderRadius: 60, // ⭐ ADD borderRadius to Image itself
+},
+defaultLogo: {
+  width: '80%',
+  height: '80%',
+  borderRadius: 48, // ⭐ ADD borderRadius to default logo too
+},
     textContainer: {
       alignItems: 'center',
       paddingHorizontal: 40,
