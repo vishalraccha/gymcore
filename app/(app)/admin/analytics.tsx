@@ -13,6 +13,7 @@ import {
   FlatList,
   Modal,
   TextInput,
+  KeyboardAvoidingView
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -104,6 +105,18 @@ const screenWidth = Dimensions.get('window').width;
 const CARD_WIDTH = screenWidth - 48;
 const CARD_SPACING = 16;
 
+// Add this helper function at the top level
+const formatIndianNumber = (num: number): string => {
+  if (num === 0) return '0';
+  const numStr = Math.floor(num).toString();
+  const lastThree = numStr.substring(numStr.length - 3);
+  const otherNumbers = numStr.substring(0, numStr.length - 3);
+  if (otherNumbers !== '') {
+    return otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ",") + "," + lastThree;
+  }
+  return lastThree;
+};
+
 export default function AnalyticsScreen() {
   const { theme } = useTheme();
   const { profile, gym } = useAuth();
@@ -113,7 +126,7 @@ export default function AnalyticsScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-
+  const [showPaymentDropdown, setShowPaymentDropdown] = useState(false);
   const [analytics, setAnalytics] = useState<Analytics>({
     monthlyRevenue: 0,
     totalRevenue: 0,
@@ -678,28 +691,28 @@ export default function AnalyticsScreen() {
       stats: [
         {
           label: 'Monthly Revenue',
-          value: `₹${(analytics.monthlyRevenue / 1000).toFixed(1)}k`,
+          value: `₹${formatIndianNumber(analytics.monthlyRevenue)}`,
           icon: <DollarSign size={18} color={theme.colors.success} />,
           change: `${analytics.revenueGrowth >= 0 ? '+' : ''}${analytics.revenueGrowth.toFixed(1)}%`,
           changeType: analytics.revenueGrowth >= 0 ? 'positive' as const : 'negative' as const,
         },
         {
           label: 'Total Revenue',
-          value: `₹${(analytics.totalRevenue / 1000).toFixed(1)}k`,
+          value: `₹${formatIndianNumber(analytics.totalRevenue)}`,
           icon: <CheckCircle2 size={18} color={theme.colors.accent} />,
           change: 'All time',
           changeType: 'positive' as const,
         },
         {
           label: 'Monthly Expense',
-          value: `₹${(analytics.monthlyExpense / 1000).toFixed(1)}k`,
+          value: `₹${formatIndianNumber(analytics.monthlyExpense)}`,
           icon: <ArrowDownCircle size={18} color={theme.colors.error} />,
           change: 'This month',
           changeType: 'negative' as const,
         },
         {
-          label: 'Monthly Income ',
-          value: `₹${(analytics.monthlyNetProfit / 1000).toFixed(1)}k`,
+          label: 'Net Profit',
+          value: `₹${formatIndianNumber(analytics.monthlyNetProfit)}`,
           icon: <TrendingUp size={18} color={theme.colors.success} />,
           change: 'This month',
           changeType: analytics.monthlyNetProfit >= 0 ? 'positive' as const : 'negative' as const,
@@ -715,21 +728,21 @@ export default function AnalyticsScreen() {
       stats: [
         {
           label: 'Total Members',
-          value: analytics.totalMembers,
+          value: formatIndianNumber(analytics.totalMembers),
           icon: <Users size={18} color={theme.colors.primary} />,
-          change: `${analytics.retentionRate.toFixed(0)}% active`,
+          change: `${analytics.retentionRate.toFixed(1)}% active`,
           changeType: 'positive' as const,
         },
         {
           label: 'New This Month',
-          value: analytics.newMembers,
+          value: formatIndianNumber(analytics.newMembers),
           icon: <UserCheck size={18} color={theme.colors.success} />,
           change: `${analytics.growthRate >= 0 ? '+' : ''}${analytics.growthRate.toFixed(1)}%`,
           changeType: analytics.growthRate >= 0 ? 'positive' as const : 'negative' as const,
         },
         {
           label: 'Active Plans',
-          value: analytics.activeSubscriptions,
+          value: formatIndianNumber(analytics.activeSubscriptions),
           icon: <CheckCircle2 size={18} color={theme.colors.success} />,
           change: 'Subscribed',
           changeType: 'positive' as const,
@@ -752,14 +765,14 @@ export default function AnalyticsScreen() {
       stats: [
         {
           label: 'Total Sessions',
-          value: analytics.totalWorkoutLogs,
+          value: formatIndianNumber(analytics.totalWorkoutLogs),
           icon: <Activity size={18} color={theme.colors.accent} />,
           change: 'All time',
           changeType: 'positive' as const,
         },
         {
           label: 'Monthly Check-ins',
-          value: analytics.monthlyCheckIns,
+          value: formatIndianNumber(analytics.monthlyCheckIns),
           icon: <Calendar size={18} color={theme.colors.primary} />,
           change: 'This month',
           changeType: 'positive' as const,
@@ -773,7 +786,7 @@ export default function AnalyticsScreen() {
         },
         {
           label: 'Calories Burned',
-          value: `${(analytics.totalCaloriesBurned / 1000).toFixed(1)}k`,
+          value: formatIndianNumber(analytics.totalCaloriesBurned),
           icon: <Flame size={18} color={theme.colors.error} />,
           change: 'Total',
           changeType: 'positive' as const,
@@ -1001,6 +1014,167 @@ export default function AnalyticsScreen() {
     carouselHeaderText: {
       flex: 1,
     },
+    floatingAddButton: {
+      position: 'absolute',
+      right: 24,
+      bottom: Platform.OS === 'ios' ? 90 : 80,
+      width: 60,
+      height: 60,
+      borderRadius: 30,
+      backgroundColor: theme.colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: theme.colors.primary,
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.4,
+      shadowRadius: 12,
+      elevation: 8,
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'flex-end',
+    },
+    modalContainer: {
+      backgroundColor: theme.colors.card,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      maxHeight: '90%',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: -4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 12,
+      elevation: 5,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingTop: 20,
+      paddingBottom: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    modalTitle: {
+      fontSize: 24,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    closeButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: theme.colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modalContent: {
+      paddingHorizontal: 20,
+      paddingBottom: 20,
+    },
+    inputGroup: {
+      marginTop: 20,
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 8,
+    },
+    input: {
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      fontSize: 16,
+      backgroundColor: theme.colors.card,
+      color: theme.colors.text,
+    },
+    textArea: {
+      height: 100,
+      textAlignVertical: 'top',
+      paddingTop: 14,
+    },
+    dropdownButton: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      backgroundColor: theme.colors.card,
+    },
+    dropdownButtonText: {
+      fontSize: 16,
+      color: theme.colors.text,
+    },
+    dropdownPlaceholder: {
+      color: theme.colors.textSecondary,
+    },
+    dropdown: {
+      marginTop: 8,
+      borderWidth: 1.5,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      backgroundColor: theme.colors.card,
+      maxHeight: 200,
+      overflow: 'hidden',
+    },
+    dropdownItem: {
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    dropdownItemText: {
+      fontSize: 16,
+      color: theme.colors.text,
+    },
+    tabContainer: {
+      flexDirection: 'row',
+      backgroundColor: theme.colors.background,
+      borderRadius: 12,
+      padding: 4,
+      marginTop: 20,
+    },
+    tab: {
+      flex: 1,
+      paddingVertical: 12,
+      alignItems: 'center',
+      borderRadius: 8,
+    },
+    activeTab: {
+      backgroundColor: theme.colors.primary,
+    },
+    tabText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    activeTabText: {
+      color: '#FFFFFF',
+    },
+    submitButton: {
+      backgroundColor: theme.colors.primary,
+      borderRadius: 12,
+      paddingVertical: 16,
+      alignItems: 'center',
+      marginTop: 24,
+      marginBottom: 20,
+    },
+    submitButtonDisabled: {
+      backgroundColor: theme.colors.border,
+      opacity: 0.6,
+    },
+    submitButtonText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
     carouselCardTitle: {
       fontSize: 20,
       fontWeight: '800',
@@ -1078,34 +1252,7 @@ export default function AnalyticsScreen() {
       shadowRadius: 8,
       elevation: 6,
     },
-    tabContainer: {
-      flexDirection: 'row',
-      gap: 12,
-      paddingHorizontal: 24,
-      marginBottom: 20,
-    },
-    tab: {
-      flex: 1,
-      paddingVertical: 14,
-      paddingHorizontal: 20,
-      borderRadius: 14,
-      backgroundColor: theme.colors.card,
-      alignItems: 'center',
-      borderWidth: 2,
-      borderColor: 'transparent',
-    },
-    activeTab: {
-      backgroundColor: theme.colors.primary + '15',
-      borderColor: theme.colors.primary,
-    },
-    tabText: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: theme.colors.textSecondary,
-    },
-    activeTabText: {
-      color: theme.colors.primary,
-    },
+    
     listCard: {
       marginHorizontal: 24,
       marginBottom: 24,
@@ -1169,98 +1316,7 @@ export default function AnalyticsScreen() {
       marginTop: 12,
       fontWeight: '600',
     },
-    modalOverlay: {
-      flex: 1,
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
-      justifyContent: 'flex-end',
-    },
-    modalContent: {
-      backgroundColor: theme.colors.card,
-      borderTopLeftRadius: 28,
-      borderTopRightRadius: 28,
-      padding: 24,
-    },
-    modalHeader: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 24,
-    },
-    modalTitle: {
-      fontSize: 24,
-      fontWeight: '800',
-      color: theme.colors.text,
-    },
-    closeButton: {
-      padding: 8,
-    },
-    input: {
-      backgroundColor: theme.colors.background,
-      borderRadius: 12,
-      padding: 16,
-      fontSize: 16,
-      color: theme.colors.text,
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-    },
-    label: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: theme.colors.text,
-      marginBottom: 8,
-    },
-    dropdownButton: {
-      backgroundColor: theme.colors.background,
-      borderRadius: 12,
-      padding: 16,
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    dropdownButtonText: {
-      fontSize: 16,
-      color: theme.colors.text,
-    },
-    dropdownPlaceholder: {
-      color: theme.colors.textSecondary,
-    },
-    dropdown: {
-      backgroundColor: theme.colors.card,
-      borderRadius: 12,
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      maxHeight: 200,
-    },
-    dropdownItem: {
-      padding: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
-    },
-    dropdownItemText: {
-      fontSize: 16,
-      color: theme.colors.text,
-      textTransform: 'capitalize',
-    },
-    submitButton: {
-      backgroundColor: theme.colors.primary,
-      borderRadius: 14,
-      padding: 18,
-      alignItems: 'center',
-      marginTop: 8,
-    },
-    submitButtonDisabled: {
-      opacity: 0.5,
-    },
-    submitButtonText: {
-      fontSize: 17,
-      fontWeight: '700',
-      color: '#FFFFFF',
-    },
+   
     changeIndicator: {
       paddingHorizontal: 10,
       paddingVertical: 5,
@@ -1422,21 +1478,10 @@ export default function AnalyticsScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerRow}>
-            <View style={styles.headerLeft}>
-              <Text style={styles.title}>Analytics</Text>
-              <Text style={styles.subtitle}>
-                {gym?.name ? `${gym.name} insights and metrics` : 'Performance insights and metrics'}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => openModal('income')}
-              activeOpacity={0.7}
-            >
-              <Plus size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
+        <Text style={styles.title}>Analytics</Text>
+<Text style={styles.subtitle}>
+  {gym?.name ? `${gym.name} insights and metrics` : 'Performance insights and metrics'}
+</Text>
         </View>
 
         {/* Month Selector */}
@@ -1600,8 +1645,8 @@ export default function AnalyticsScreen() {
                         </Text>
                       </View>
                       <Text style={[styles.itemAmount, { color: theme.colors.success }]}>
-                        ₹{item.amount.toLocaleString()}
-                      </Text>
+  ₹{formatIndianNumber(item.amount)}
+</Text>
                     </View>
                   </View>
                 ))}
@@ -1653,8 +1698,8 @@ export default function AnalyticsScreen() {
                         </Text>
                       </View>
                       <Text style={[styles.itemAmount, { color: theme.colors.error }]}>
-                        ₹{item.amount.toLocaleString()}
-                      </Text>
+  ₹{formatIndianNumber(item.amount)}
+</Text>
                     </View>
                   </View>
                 ))}
@@ -1687,134 +1732,160 @@ export default function AnalyticsScreen() {
         </Card>
 
         {/* Quick Insights */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>⚡ Quick Insights</Text>
-          <Text style={styles.sectionSubtitle}>Key performance indicators</Text>
-        </View>
-        <View style={styles.insightsGrid}>
-          <View style={styles.insightCard}>
-            <View style={styles.insightHeader}>
-              <Clock size={20} color={theme.colors.warning} />
-              <Text style={styles.insightLabel}>Peak Hours</Text>
-            </View>
-            <Text style={styles.insightValue}>{analytics.peakHours}</Text>
-            <Text style={styles.insightChange}>Busiest time</Text>
-          </View>
+        {/* Quick Insights */}
+<View style={styles.sectionHeader}>
+  <Text style={styles.sectionTitle}>⚡ Quick Insights</Text>
+  <Text style={styles.sectionSubtitle}>Key performance indicators</Text>
+</View>
+<View style={styles.insightsGrid}>
+  <View style={styles.insightCard}>
+    <View style={styles.insightHeader}>
+      <Clock size={20} color={theme.colors.warning} />
+      <Text style={styles.insightLabel}>Peak Hours</Text>
+    </View>
+    <Text style={styles.insightValue}>{analytics.peakHours}</Text>
+    <Text style={styles.insightChange}>Busiest time</Text>
+  </View>
 
-          <View style={styles.insightCard}>
-            <View style={styles.insightHeader}>
-              <Dumbbell size={20} color={theme.colors.accent} />
-              <Text style={styles.insightLabel}>Popular Workout</Text>
-            </View>
-            <Text style={styles.insightValue} numberOfLines={1}>
-              {analytics.popularWorkout}
-            </Text>
-            <Text style={styles.insightChange}>Most completed</Text>
-          </View>
+  <View style={styles.insightCard}>
+    <View style={styles.insightHeader}>
+      <Dumbbell size={20} color={theme.colors.accent} />
+      <Text style={styles.insightLabel}>Popular Workout</Text>
+    </View>
+    <Text style={styles.insightValue} numberOfLines={1}>
+      {analytics.popularWorkout}
+    </Text>
+    <Text style={styles.insightChange}>Most completed</Text>
+  </View>
 
-          <View style={styles.insightCard}>
-            <View style={styles.insightHeader}>
-              <Target size={20} color={theme.colors.primary} />
-              <Text style={styles.insightLabel}>Completion Rate</Text>
-            </View>
-            <Text style={styles.insightValue}>{analytics.completionRate.toFixed(1)}%</Text>
-            <Text style={styles.insightChange}>Attendance rate</Text>
-          </View>
+  <View style={styles.insightCard}>
+    <View style={styles.insightHeader}>
+      <Target size={20} color={theme.colors.primary} />
+      <Text style={styles.insightLabel}>Completion Rate</Text>
+    </View>
+    <Text style={styles.insightValue}>{analytics.completionRate.toFixed(1)}%</Text>
+    <Text style={styles.insightChange}>Attendance rate</Text>
+  </View>
 
-          <View style={styles.insightCard}>
-            <View style={styles.insightHeader}>
-              <Award size={20} color={theme.colors.success} />
-              <Text style={styles.insightLabel}>Avg Workouts</Text>
-            </View>
-            <Text style={styles.insightValue}>{analytics.avgWorkouts.toFixed(1)}</Text>
-            <Text style={styles.insightChange}>Per member</Text>
-          </View>
-        </View>
+  <View style={styles.insightCard}>
+    <View style={styles.insightHeader}>
+      <Award size={20} color={theme.colors.success} />
+      <Text style={styles.insightLabel}>Avg Workouts</Text>
+    </View>
+    <Text style={styles.insightValue}>{analytics.avgWorkouts.toFixed(1)}</Text>
+    <Text style={styles.insightChange}>Per member</Text>
+  </View>
+</View>
       </Animated.ScrollView>
-
+{/* Floating Add Button */}
+<TouchableOpacity
+  style={styles.floatingAddButton}
+  onPress={() => openModal('income')}
+  activeOpacity={0.7}
+>
+  <Plus size={28} color="#FFFFFF" />
+</TouchableOpacity>
       {/* Add Income/Expense Modal */}
       <Modal
-        visible={modalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setModalVisible(false)}
-        >
+  visible={modalVisible}
+  transparent
+  animationType="slide"
+  onRequestClose={() => setModalVisible(false)}
+>
+  <KeyboardAvoidingView
+    style={{ flex: 1 }}
+    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+  >
+    <View style={styles.modalOverlay}>
+      <View style={styles.modalContainer}>
+        {/* Header with Close Button */}
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>
+            Add {modalType === 'income' ? 'Income' : 'Expense'}
+          </Text>
           <TouchableOpacity
-            activeOpacity={1}
-            onPress={(e) => e.stopPropagation()}
+            style={styles.closeButton}
+            onPress={() => {
+              setModalVisible(false);
+              setShowTypeDropdown(false);
+              setShowPaymentDropdown(false);
+            }}
+            activeOpacity={0.7}
           >
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>
-                  Add {modalType === 'income' ? 'Income' : 'Expense'}
-                </Text>
-                <TouchableOpacity
-                  style={styles.closeButton}
-                  onPress={() => setModalVisible(false)}
-                >
-                  <X size={24} color={theme.colors.text} />
-                </TouchableOpacity>
-              </View>
+            <X size={24} color={theme.colors.text} />
+          </TouchableOpacity>
+        </View>
 
-              <View style={styles.tabContainer}>
-                <TouchableOpacity
-                  style={[styles.tab, modalType === 'income' && styles.activeTab]}
-                  onPress={() => {
-                    setModalType('income');
-                    setFormData({ ...formData, type: '' });
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.tabText, modalType === 'income' && styles.activeTabText]}>
-                    Income
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.tab, modalType === 'expense' && styles.activeTab]}
-                  onPress={() => {
-                    setModalType('expense');
-                    setFormData({ ...formData, type: '' });
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.tabText, modalType === 'expense' && styles.activeTabText]}>
-                    Expense
-                  </Text>
-                </TouchableOpacity>
-              </View>
+        <ScrollView 
+          style={styles.modalContent} 
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Income/Expense Tabs */}
+          <View style={styles.tabContainer}>
+            <TouchableOpacity
+              style={[styles.tab, modalType === 'income' && styles.activeTab]}
+              onPress={() => {
+                setModalType('income');
+                setFormData({ ...formData, type: '' });
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.tabText, modalType === 'income' && styles.activeTabText]}>
+                Income
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, modalType === 'expense' && styles.activeTab]}
+              onPress={() => {
+                setModalType('expense');
+                setFormData({ ...formData, type: '' });
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.tabText, modalType === 'expense' && styles.activeTabText]}>
+                Expense
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-              <Text style={styles.label}>Name *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.name}
-                onChangeText={(text) => setFormData({ ...formData, name: text })}
-                placeholder="Enter name"
-                placeholderTextColor={theme.colors.textSecondary}
-              />
+          {/* Name Field */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Name *</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.name}
+              onChangeText={(text) => setFormData({ ...formData, name: text })}
+              placeholder="Enter name"
+              placeholderTextColor={theme.colors.textSecondary}
+            />
+          </View>
 
-              <Text style={styles.label}>Type *</Text>
-              <TouchableOpacity
-                style={styles.dropdownButton}
-                onPress={() => setShowTypeDropdown(!showTypeDropdown)}
+          {/* Type Dropdown */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Type *</Text>
+            <TouchableOpacity
+              style={styles.dropdownButton}
+              onPress={() => {
+                setShowTypeDropdown(!showTypeDropdown);
+                setShowPaymentDropdown(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.dropdownButtonText,
+                  !formData.type && styles.dropdownPlaceholder,
+                ]}
               >
-                <Text
-                  style={[
-                    styles.dropdownButtonText,
-                    !formData.type && styles.dropdownPlaceholder,
-                  ]}
-                >
-                  {formData.type || 'Select type'}
-                </Text>
-                <ChevronDown size={20} color={theme.colors.textSecondary} />
-              </TouchableOpacity>
+                {formData.type || 'Select type'}
+              </Text>
+              <ChevronDown size={20} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
 
-              {showTypeDropdown && (
-                <ScrollView style={styles.dropdown} nestedScrollEnabled>
+            {showTypeDropdown && (
+              <View style={styles.dropdown}>
+                <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
                   {(modalType === 'income' ? incomeTypes : expenseTypes).map((type) => (
                     <TouchableOpacity
                       key={type}
@@ -1823,65 +1894,108 @@ export default function AnalyticsScreen() {
                         setFormData({ ...formData, type });
                         setShowTypeDropdown(false);
                       }}
+                      activeOpacity={0.7}
                     >
                       <Text style={styles.dropdownItemText}>{type}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
-              )}
+              </View>
+            )}
+          </View>
 
-              <Text style={styles.label}>Amount *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.amount}
-                onChangeText={(text) => setFormData({ ...formData, amount: text })}
-                placeholder="Enter amount"
-                placeholderTextColor={theme.colors.textSecondary}
-                keyboardType="numeric"
-              />
+          {/* Amount Field */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Amount *</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.amount}
+              onChangeText={(text) => setFormData({ ...formData, amount: text })}
+              placeholder="Enter amount"
+              placeholderTextColor={theme.colors.textSecondary}
+              keyboardType="numeric"
+            />
+          </View>
 
-              <Text style={styles.label}>Payment Method</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.payment_method}
-                onChangeText={(text) => setFormData({ ...formData, payment_method: text })}
-                placeholder="e.g., Cash, Card, UPI"
-                placeholderTextColor={theme.colors.textSecondary}
-              />
-
-              <Text style={styles.label}>Description</Text>
-              <TextInput
-                style={[styles.input, { height: 100, textAlignVertical: 'top' }]}
-                value={formData.description}
-                onChangeText={(text) => setFormData({ ...formData, description: text })}
-                placeholder="Enter description"
-                placeholderTextColor={theme.colors.textSecondary}
-                multiline
-                numberOfLines={4}
-              />
-
-              <TouchableOpacity
+          {/* Payment Method Dropdown */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Payment Method *</Text>
+            <TouchableOpacity
+              style={styles.dropdownButton}
+              onPress={() => {
+                setShowPaymentDropdown(!showPaymentDropdown);
+                setShowTypeDropdown(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text
                 style={[
-                  styles.submitButton,
-                  (!formData.name || !formData.type || !formData.amount || submitting) &&
-                  styles.submitButtonDisabled,
+                  styles.dropdownButtonText,
+                  !formData.payment_method && styles.dropdownPlaceholder,
                 ]}
-                onPress={handleSubmit}
-                disabled={!formData.name || !formData.type || !formData.amount || submitting}
-                activeOpacity={0.7}
               >
-                {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.submitButtonText}>
-                    Add {modalType === 'income' ? 'Income' : 'Expense'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </ScrollView>
+                {formData.payment_method || 'Select payment method'}
+              </Text>
+              <ChevronDown size={20} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+
+            {showPaymentDropdown && (
+              <View style={styles.dropdown}>
+                {['Cash', 'Online'].map((method) => (
+                  <TouchableOpacity
+                    key={method}
+                    style={styles.dropdownItem}
+                    onPress={() => {
+                      setFormData({ ...formData, payment_method: method });
+                      setShowPaymentDropdown(false);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.dropdownItemText}>{method}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {/* Description Field */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Description (Optional)</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              value={formData.description}
+              onChangeText={(text) => setFormData({ ...formData, description: text })}
+              placeholder="Enter description"
+              placeholderTextColor={theme.colors.textSecondary}
+              multiline
+              numberOfLines={4}
+            />
+          </View>
+
+          {/* Submit Button */}
+          <TouchableOpacity
+            style={[
+              styles.submitButton,
+              (!formData.name || !formData.type || !formData.amount || !formData.payment_method || submitting) &&
+              styles.submitButtonDisabled,
+            ]}
+            onPress={handleSubmit}
+            disabled={!formData.name || !formData.type || !formData.amount || !formData.payment_method || submitting}
+            activeOpacity={0.7}
+          >
+            {submitting ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.submitButtonText}>
+                Add {modalType === 'income' ? 'Income' : 'Expense'}
+              </Text>
+            )}
           </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        </ScrollView>
+      </View>
+    </View>
+  </KeyboardAvoidingView>
+</Modal>
     </SafeAreaWrapper>
   );
 }

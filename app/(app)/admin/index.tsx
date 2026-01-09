@@ -141,30 +141,30 @@ export default function AdminDashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-  if (!profile) return;
+    if (!profile) return;
 
-  if (!['admin', 'gym_owner'].includes(profile.role)) {
-    router.replace('/(app)/(tabs)');
-    return;
-  }
+    if (!['admin', 'gym_owner'].includes(profile.role)) {
+      router.replace('/(app)/(tabs)');
+      return;
+    }
 
-  // Only fetch on mount or when profile changes
-  fetchDashboardData();
+    // Only fetch on mount or when profile changes
+    fetchDashboardData();
 
-  // Entrance animation
-  Animated.parallel([
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 800,
-      useNativeDriver: true,
-    }),
-    Animated.timing(slideAnim, {
-      toValue: 0,
-      duration: 600,
-      useNativeDriver: true,
-    }),
-  ]).start();
-}, [profile?.id]); // ⭐ Changed dependency to profile?.id instead of profile
+    // Entrance animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [profile?.id]); // ⭐ Changed dependency to profile?.id instead of profile
 
   useEffect(() => {
     if (!isLoading && profile) {
@@ -243,7 +243,16 @@ export default function AdminDashboardScreen() {
       return last12Months;
     }
   };
-
+  const formatIndianNumber = (num: number): string => {
+    if (num === 0) return '0';
+    const numStr = Math.floor(num).toString();
+    const lastThree = numStr.substring(numStr.length - 3);
+    const otherNumbers = numStr.substring(0, numStr.length - 3);
+    if (otherNumbers !== '') {
+      return otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ",") + "," + lastThree;
+    }
+    return lastThree;
+  };
   const fetchDashboardData = async () => {
     setIsLoading(true);
     try {
@@ -305,7 +314,7 @@ export default function AdminDashboardScreen() {
       );
 
       // Member retention rate
-      const memberRetention = totalMembers > 0 ? (activeMembers / totalMembers) * 100 : 0;
+      const memberRetention = totalMembers > 0 ? Math.round((activeMembers / totalMembers) * 100 * 10) / 10 : 0;
 
       // Find most popular plan
       const mostPopularPlan = Object.keys(subscriptionCounts).reduce((a, b) =>
@@ -338,7 +347,7 @@ export default function AdminDashboardScreen() {
       }).length;
 
       const monthlyGrowth = newMembersLastMonth > 0
-        ? ((newMembersThisMonth - newMembersLastMonth) / newMembersLastMonth) * 100
+        ? Math.round(((newMembersThisMonth - newMembersLastMonth) / newMembersLastMonth) * 100 * 10) / 10
         : newMembersThisMonth > 0 ? 100 : 0;
 
       // Fetch workout logs
@@ -392,7 +401,7 @@ export default function AdminDashboardScreen() {
 
       // Average attendance rate
       const avgAttendanceRate = totalMembers > 0 && weeklyCheckIns > 0
-        ? (weeklyCheckIns / (totalMembers * 7)) * 100
+        ? Math.round((weeklyCheckIns / (totalMembers * 7)) * 100 * 10) / 10
         : 0;
 
       // Peak hours analysis
@@ -411,48 +420,49 @@ export default function AdminDashboardScreen() {
 
       // Fetch revenue data
       // Fetch revenue from user_subscriptions
-let subscriptionsQuery = supabase
-.from('user_subscriptions')
-.select('total_amount, paid_amount, pending_amount, created_at, payment_status, payment_date');
+      let subscriptionsQuery = supabase
+        .from('user_subscriptions')
+        .select('total_amount, paid_amount, pending_amount, created_at, payment_status, payment_date');
 
-if (isGymOwner && gymId) {
-subscriptionsQuery = subscriptionsQuery.eq('gym_id', gymId);
-}
-const { data: subscriptions } = await subscriptionsQuery;
+      if (isGymOwner && gymId) {
+        subscriptionsQuery = subscriptionsQuery.eq('gym_id', gymId);
+      }
+      const { data: subscriptions } = await subscriptionsQuery;
 
-// Calculate total revenue from paid amounts
-const totalRevenue = (subscriptions || []).reduce(
-(sum, sub) => sum + Number(sub.paid_amount || 0),
-0
-);
+      // Calculate total revenue from paid amounts
+      const totalRevenue = (subscriptions || []).reduce(
+        (sum, sub) => sum + Number(sub.paid_amount || 0),
+        0
+      );
 
-// Calculate monthly revenue (current calendar month to match Analytics)
-const currentMonth = new Date().getMonth();
-const currentYear = new Date().getFullYear();
+      // Calculate monthly revenue (current calendar month to match Analytics)
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
 
-const monthlyRevenue = (subscriptions || [])
-  .filter((sub: any) => {
-    if (!sub?.paid_amount || sub.paid_amount === 0) return false;
-    const dateToCheck = sub.payment_date || sub.start_date || sub.created_at;
-    if (!dateToCheck) return false;
-    
-    const paymentDate = new Date(dateToCheck);
-    return paymentDate.getMonth() === currentMonth && paymentDate.getFullYear() === currentYear;
-  })
-  .reduce((sum, sub) => sum + Number(sub.paid_amount || 0), 0);
+      const monthlyRevenue = (subscriptions || [])
+        .filter((sub: any) => {
+          if (!sub?.paid_amount || sub.paid_amount === 0) return false;
+          const dateToCheck = sub.payment_date || sub.start_date || sub.created_at;
+          if (!dateToCheck) return false;
 
-const avgRevenuePerMember = activeMembers > 0 ? totalRevenue / activeMembers : 0;
+          const paymentDate = new Date(dateToCheck);
+          return paymentDate.getMonth() === currentMonth && paymentDate.getFullYear() === currentYear;
+        })
+        .reduce((sum, sub) => sum + Number(sub.paid_amount || 0), 0);
 
-// Calculate pending payments from user_subscriptions
-const pendingPayments = (subscriptions || [])
-.filter((sub: any) => sub.payment_status === 'pending' || sub.pending_amount > 0)
-.reduce((sum, sub) => sum + Number(sub.pending_amount || 0), 0);
+      const avgRevenuePerMember = activeMembers > 0 ? totalRevenue / activeMembers : 0;
 
-// For revenue trend calculation, transform subscriptions data to match payment format
-const paymentsForTrend = (subscriptions || []).map((sub: any) => ({
-payment_date: sub.payment_date || sub.created_at,
-amount: sub.paid_amount || 0,
-}));
+
+      // Calculate pending payments from user_subscriptions
+      const pendingPayments = (subscriptions || [])
+        .filter((sub: any) => sub.payment_status === 'pending' || sub.pending_amount > 0)
+        .reduce((sum, sub) => sum + Number(sub.pending_amount || 0), 0);
+
+      // For revenue trend calculation, transform subscriptions data to match payment format
+      const paymentsForTrend = (subscriptions || []).map((sub: any) => ({
+        payment_date: sub.payment_date || sub.created_at,
+        amount: sub.paid_amount || 0,
+      }));
       // Fetch active plans count
       let plansQuery = supabase
         .from('subscriptions')
@@ -477,24 +487,26 @@ amount: sub.paid_amount || 0,
         newMembersThisMonth,
         newMembersLastMonth,
         totalWorkoutLogs,
-        totalCaloriesBurned: Math.round(totalCaloriesBurned),
+        totalCaloriesBurned,
         totalMinutesExercised,
         avgSessionDuration: Math.round(avgSessionDuration),
         weeklyCheckIns,
         monthlyCheckIns,
         todayCheckIns,
-        monthlyGrowth: Math.round(monthlyGrowth * 10) / 10,
+        monthlyGrowth, // Already rounded above
         topPerformer,
-        totalRevenue: Math.round(totalRevenue),
-        monthlyRevenue: Math.round(monthlyRevenue),
-        pendingPayments: Math.round(pendingPayments),
-        avgRevenuePerMember: Math.round(avgRevenuePerMember),
+        totalRevenue,
+        monthlyRevenue,
+        pendingPayments,
+        avgRevenuePerMember,
         activePlans: activePlans || 0,
         mostPopularPlan,
-        avgAttendanceRate: Math.round(avgAttendanceRate),
+        avgAttendanceRate, // Already rounded above
         peakHours,
-        memberRetention: Math.round(memberRetention),
+        memberRetention, // Already rounded above
       });
+
+
 
       setWeeklyActivity(weeklyData);
       setLeaderboard(leaderboardData);
@@ -640,21 +652,21 @@ amount: sub.paid_amount || 0,
       stats: [
         {
           label: 'Total Members',
-          value: stats.totalMembers,
+          value: formatIndianNumber(stats.totalMembers),
           icon: <Users size={20} color={theme.colors.primary} />,
           change: `+${stats.newMembersThisMonth}`,
           changeType: 'positive' as const,
         },
         {
           label: 'Active Subscriptions',
-          value: stats.activeMembers,
+          value: formatIndianNumber(stats.activeMembers),
           icon: <UserCheck size={20} color={theme.colors.success} />,
           change: `${stats.memberRetention}%`,
           changeType: 'positive' as const,
         },
         {
           label: 'Expired',
-          value: stats.expiredMembers,
+          value: formatIndianNumber(stats.expiredMembers),
           icon: <UserX size={20} color={theme.colors.error} />,
           change: 'Need renewal',
           changeType: 'negative' as const,
@@ -679,28 +691,28 @@ amount: sub.paid_amount || 0,
       stats: [
         {
           label: 'Total Revenue',
-          value: `₹${(stats.totalRevenue / 1000).toFixed(1)}k`,
+          value: `₹${formatIndianNumber(stats.totalRevenue)}`,
           icon: <DollarSign size={20} color={theme.colors.success} />,
           change: 'All time',
           changeType: 'positive' as const,
         },
         {
           label: 'This Month',
-          value: `₹${(stats.monthlyRevenue / 1000).toFixed(1)}k`,
+          value: `₹${formatIndianNumber(stats.monthlyRevenue)}`,
           icon: <Calendar size={20} color={theme.colors.primary} />,
           change: 'Last 30 days',
           changeType: 'positive' as const,
         },
         {
           label: 'Pending Payments',
-          value: `₹${(stats.pendingPayments / 1000).toFixed(1)}k`,
+          value: `₹${formatIndianNumber(stats.pendingPayments)}`,
           icon: <AlertCircle size={20} color={theme.colors.warning} />,
           change: 'To collect',
           changeType: 'neutral' as const,
         },
         {
           label: 'Avg/Member',
-          value: `₹${(stats.avgRevenuePerMember / 1000).toFixed(1)}k`,
+          value: `₹${formatIndianNumber(stats.avgRevenuePerMember)}`,
           icon: <BarChart3 size={20} color={theme.colors.accent} />,
           change: 'Per active',
           changeType: 'positive' as const,
@@ -716,14 +728,14 @@ amount: sub.paid_amount || 0,
       stats: [
         {
           label: 'Total Sessions',
-          value: stats.totalWorkoutLogs,
+          value: formatIndianNumber(stats.totalWorkoutLogs),
           icon: <Activity size={20} color={theme.colors.accent} />,
           change: 'All workouts',
           changeType: 'positive' as const,
         },
         {
           label: 'Calories Burned',
-          value: `${(stats.totalCaloriesBurned / 1000).toFixed(1)}k`,
+          value: formatIndianNumber(stats.totalCaloriesBurned),
           icon: <Flame size={20} color={theme.colors.error} />,
           change: 'Total burn',
           changeType: 'positive' as const,
@@ -753,21 +765,21 @@ amount: sub.paid_amount || 0,
       stats: [
         {
           label: 'Today\'s Check-ins',
-          value: stats.todayCheckIns,
+          value: formatIndianNumber(stats.todayCheckIns),
           icon: <Calendar size={20} color={theme.colors.primary} />,
           change: 'Live count',
           changeType: 'positive' as const,
         },
         {
           label: 'This Week',
-          value: stats.weeklyCheckIns,
+          value: formatIndianNumber(stats.weeklyCheckIns),
           icon: <CheckCircle2 size={20} color={theme.colors.success} />,
           change: 'Last 7 days',
           changeType: 'positive' as const,
         },
         {
           label: 'This Month',
-          value: stats.monthlyCheckIns,
+          value: formatIndianNumber(stats.monthlyCheckIns),
           icon: <BarChart3 size={20} color={theme.colors.accent} />,
           change: 'Last 30 days',
           changeType: 'positive' as const,
@@ -978,7 +990,7 @@ amount: sub.paid_amount || 0,
       shadowRadius: 16,
       elevation: 8,
       overflow: 'hidden',
-      marginBottom:18,
+      marginBottom: 18,
     },
     carouselCardHeader: {
       padding: 24,
@@ -988,7 +1000,7 @@ amount: sub.paid_amount || 0,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 16,
-      marginBottom:10,
+      marginBottom: 10,
     },
     carouselIconContainer: {
       width: 56,
@@ -1399,6 +1411,341 @@ amount: sub.paid_amount || 0,
       fontSize: 16,
       fontWeight: '700',
     },
+    weekTotalChip: {
+  backgroundColor: theme.colors.primary + '15',
+  paddingHorizontal: 14,
+  paddingVertical: 8,
+  borderRadius: 20,
+},
+weekTotalChipText: {
+  fontSize: 13,
+  fontWeight: '700',
+  color: theme.colors.primary,
+},
+weeklyGridContainer: {
+  flexDirection: 'row',
+  flexWrap: 'wrap',
+  paddingHorizontal: 24,
+  gap: 12,
+  marginBottom: 16,
+},
+weeklyDayCard: {
+  flex: 1,
+  minWidth: '13%',
+  aspectRatio: 0.8,
+  padding: 12,
+  alignItems: 'center',
+  justifyContent: 'center',
+  position: 'relative',
+  backgroundColor: theme.colors.card,
+  borderWidth: 1,
+  borderColor: theme.colors.border,
+},
+weeklyDayCardHighest: {
+  backgroundColor: theme.colors.primary + '10',
+  borderColor: theme.colors.primary,
+  borderWidth: 2,
+},
+crownBadge: {
+  position: 'absolute',
+  top: 6,
+  right: 6,
+  width: 20,
+  height: 20,
+  borderRadius: 10,
+  backgroundColor: '#FFF9E6',
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+weeklyDayLabel: {
+  fontSize: 12,
+  fontWeight: '700',
+  color: theme.colors.textSecondary,
+  marginBottom: 8,
+  textTransform: 'uppercase',
+},
+weeklyDayLabelHighest: {
+  color: theme.colors.primary,
+},
+weeklyDayValue: {
+  fontSize: 24,
+  fontWeight: '800',
+  color: theme.colors.text,
+  marginBottom: 2,
+},
+weeklyDayValueHighest: {
+  color: theme.colors.primary,
+},
+weeklyDaySubtext: {
+  fontSize: 9,
+  color: theme.colors.textSecondary,
+  fontWeight: '600',
+  marginBottom: 8,
+},
+weeklyDayBarContainer: {
+  width: '100%',
+  height: 32,
+  backgroundColor: theme.colors.background,
+  borderRadius: 4,
+  overflow: 'hidden',
+  marginTop: 4,
+  justifyContent: 'flex-end',
+},
+weeklyDayBar: {
+  width: '100%',
+  borderRadius: 4,
+  minHeight: 2,
+},
+weeklyStatsRow: {
+  flexDirection: 'row',
+  marginHorizontal: 24,
+  marginBottom: 24,
+  backgroundColor: theme.colors.card,
+  borderRadius: 16,
+  padding: 16,
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.06,
+  shadowRadius: 8,
+  elevation: 3,
+},
+weeklyStatItem: {
+  flex: 1,
+  alignItems: 'center',
+  gap: 6,
+},
+weeklyStatDivider: {
+  width: 1,
+  backgroundColor: theme.colors.border,
+  marginHorizontal: 8,
+},
+weeklyStatLabel: {
+  fontSize: 11,
+  color: theme.colors.textSecondary,
+  fontWeight: '600',
+},
+weeklyStatValue: {
+  fontSize: 15,
+  fontWeight: '800',
+  color: theme.colors.text,
+},
+activitySection: {
+  marginTop: 12,
+  marginBottom: 24,
+},
+activityHeader: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  paddingHorizontal: 24,
+  marginBottom: 16,
+},
+activityHeaderLeft: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 14,
+  flex: 1,
+},
+activityIconBox: {
+  width: 44,
+  height: 44,
+  borderRadius: 12,
+  backgroundColor: theme.colors.primary,
+  alignItems: 'center',
+  justifyContent: 'center',
+  shadowColor: theme.colors.primary,
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.3,
+  shadowRadius: 8,
+  elevation: 5,
+},
+activityTitle: {
+  fontSize: 20,
+  fontWeight: '800',
+  color: theme.colors.text,
+  letterSpacing: -0.5,
+},
+activitySubtitle: {
+  fontSize: 13,
+  color: theme.colors.textSecondary,
+  fontWeight: '600',
+  marginTop: 2,
+},
+activityTotalBox: {
+  alignItems: 'flex-end',
+  backgroundColor: theme.colors.primary + '10',
+  paddingHorizontal: 16,
+  paddingVertical: 10,
+  borderRadius: 12,
+  borderWidth: 1,
+  borderColor: theme.colors.primary + '20',
+},
+activityTotalLabel: {
+  fontSize: 11,
+  color: theme.colors.primary,
+  fontWeight: '700',
+  textTransform: 'uppercase',
+  letterSpacing: 0.5,
+},
+activityTotalValue: {
+  fontSize: 22,
+  fontWeight: '900',
+  color: theme.colors.primary,
+  marginTop: 2,
+  letterSpacing: -0.5,
+},
+activityCard: {
+  marginHorizontal: 24,
+  padding: 20,
+  borderRadius: 20,
+  backgroundColor: theme.colors.card,
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 8 },
+  shadowOpacity: 0.12,
+  shadowRadius: 16,
+  elevation: 8,
+},
+metricsBar: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  marginBottom: 24,
+  paddingBottom: 20,
+  borderBottomWidth: 1,
+  borderBottomColor: theme.colors.border + '50',
+},
+metricItem: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 10,
+  flex: 1,
+},
+metricIconCircle: {
+  width: 36,
+  height: 36,
+  borderRadius: 10,
+  backgroundColor: theme.colors.background,
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderWidth: 1,
+  borderColor: theme.colors.border + '50',
+},
+metricContent: {
+  flex: 1,
+},
+metricLabel: {
+  fontSize: 10,
+  color: theme.colors.textSecondary,
+  fontWeight: '600',
+  textTransform: 'uppercase',
+  letterSpacing: 0.3,
+  marginBottom: 3,
+},
+metricValue: {
+  fontSize: 16,
+  fontWeight: '800',
+  color: theme.colors.text,
+  letterSpacing: -0.3,
+},
+daysContainer: {
+  gap: 16,
+},
+dayRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 12,
+},
+dayLabelContainer: {
+  width: 50,
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 4,
+},
+dayLabel: {
+  fontSize: 14,
+  fontWeight: '700',
+  color: theme.colors.textSecondary,
+  letterSpacing: 0.3,
+},
+dayLabelHighest: {
+  color: theme.colors.primary,
+  fontSize: 15,
+  fontWeight: '800',
+},
+bestBadge: {
+  width: 16,
+  height: 16,
+  borderRadius: 8,
+  backgroundColor: '#FFF9E6',
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+progressBarContainer: {
+  flex: 1,
+  height: 40,
+  backgroundColor: theme.colors.background,
+  borderRadius: 10,
+  overflow: 'hidden',
+  borderWidth: 1,
+  borderColor: theme.colors.border + '30',
+},
+progressBar: {
+  height: '100%',
+  borderRadius: 10,
+  justifyContent: 'center',
+  alignItems: 'flex-end',
+  paddingRight: 10,
+  position: 'relative',
+  minWidth: 3,
+},
+progressGradient: {
+  position: 'absolute',
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+  borderRadius: 10,
+},
+dayValue: {
+  fontSize: 15,
+  fontWeight: '800',
+  color: theme.colors.text,
+  minWidth: 45,
+  textAlign: 'right',
+  letterSpacing: -0.3,
+},
+dayValueHighest: {
+  color: theme.colors.primary,
+  fontSize: 17,
+  fontWeight: '900',
+},
+insightBox: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 12,
+  marginTop: 20,
+  paddingTop: 20,
+  paddingHorizontal: 16,
+  paddingVertical: 14,
+  backgroundColor: theme.colors.success + '08',
+  borderRadius: 12,
+  borderWidth: 1,
+  borderColor: theme.colors.success + '20',
+},
+insightIcon: {
+  width: 32,
+  height: 32,
+  borderRadius: 8,
+  backgroundColor: theme.colors.success + '15',
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+insightText: {
+  flex: 1,
+  fontSize: 13,
+  color: theme.colors.text,
+  fontWeight: '600',
+  lineHeight: 18,
+},
   });
 
   if (isLoading && !refreshing) {
@@ -1509,53 +1856,30 @@ amount: sub.paid_amount || 0,
         <View style={styles.statsRow}>
           <View style={styles.miniStatCard}>
             <Target size={24} color={theme.colors.accent} />
-            <Text style={styles.miniStatValue}>{stats.activePlans}</Text>
+            <Text style={styles.miniStatValue}>{formatIndianNumber(stats.activePlans)}</Text>
             <Text style={styles.miniStatLabel}>Active Plans</Text>
           </View>
           <View style={styles.miniStatCard}>
             <Star size={24} color={theme.colors.warning} />
-            <Text style={styles.miniStatValue}>{stats.avgAttendanceRate}%</Text>
+            <Text style={styles.miniStatValue}>{stats.avgAttendanceRate.toFixed(1)}%</Text>
             <Text style={styles.miniStatLabel}>Attendance</Text>
           </View>
           <View style={styles.miniStatCard}>
             <CreditCard size={24} color={theme.colors.error} />
-            <Text style={styles.miniStatValue}>₹{(stats.pendingPayments / 1000).toFixed(0)}k</Text>
+            <Text style={styles.miniStatValue}>₹{formatIndianNumber(stats.pendingPayments)}</Text>
             <Text style={styles.miniStatLabel}>Pending</Text>
           </View>
         </View>
 
-        {/* Weekly Activity Chart */}
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>📊 Weekly Activity</Text>
-            <Text style={styles.sectionSubtitle}>Member check-ins • Last 7 days</Text>
-          </View>
-        </View>
-        <Card style={styles.chartCard}>
-          <LazyLineChart
-            data={weeklyActivity}
-            width={screenWidth - 96}
-            height={220}
-            chartConfig={chartConfig}
-            style={styles.chart}
-            bezier
-            fromZero
-            withDots
-            withInnerLines
-            withOuterLines
-            withVerticalLines
-            withHorizontalLines
-          />
-        </Card>
-
+     
         {/* Revenue Trend with Filters */}
         <View style={styles.sectionHeader}>
           <View>
             <Text style={styles.sectionTitle}>💰 Revenue Trend</Text>
             <Text style={styles.sectionSubtitle}>
-              {revenueFilter === 'day' ? 'Daily revenue • Last 7 days' : 
-               revenueFilter === 'month' ? 'Monthly revenue • Last 6 months' :
-               'Monthly revenue • Last 12 months'}
+              {revenueFilter === 'day' ? 'Daily revenue • Last 7 days' :
+                revenueFilter === 'month' ? 'Monthly revenue • Last 6 months' :
+                  'Monthly revenue • Last 12 months'}
             </Text>
           </View>
         </View>
@@ -1576,7 +1900,7 @@ amount: sub.paid_amount || 0,
                 Daily
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[
                 styles.filterButton,
@@ -1592,7 +1916,7 @@ amount: sub.paid_amount || 0,
                 Monthly
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[
                 styles.filterButton,
@@ -1609,7 +1933,7 @@ amount: sub.paid_amount || 0,
               </Text>
             </TouchableOpacity>
           </View>
-          
+
           <LazyLineChart
             data={revenueChartData}
             width={screenWidth - 96}
@@ -1653,7 +1977,7 @@ amount: sub.paid_amount || 0,
                 {membershipDistribution.map((item, index) => {
                   const total = membershipDistribution.reduce((sum, i) => sum + i.population, 0);
                   const percentage = ((item.population / total) * 100).toFixed(1);
-                  
+
                   return (
                     <View key={index} style={styles.legendItem}>
                       <View style={styles.legendLeft}>
@@ -1727,7 +2051,7 @@ amount: sub.paid_amount || 0,
                             {member.totalWorkouts}
                           </Text>
                         </View>
-                        
+
                         <View style={styles.statBadge}>
                           <Zap size={14} color={theme.colors.warning} />
                           <Text style={styles.statBadgeText}>

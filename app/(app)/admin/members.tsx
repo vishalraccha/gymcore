@@ -127,7 +127,7 @@ export default function MembersScreen() {
     profile_photo_uri: '',
     member_id: '',
     notes: '',
-    joining_date: new Date().toISOString().split('T')[0],
+    // joining_date: new Date().toISOString().split('T')[0],
   });
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [updatingPhoto, setUpdatingPhoto] = useState(false);
@@ -157,7 +157,7 @@ export default function MembersScreen() {
   const [admissionFee, setAdmissionFee] = useState('50');
   const [discountAmount, setDiscountAmount] = useState('');
   const [selectedGender, setSelectedGender] = useState<'male' | 'female'>('male');
-  const [showJoiningDatePicker, setShowJoiningDatePicker] = useState(false);
+  // const [showJoiningDatePicker, setShowJoiningDatePicker] = useState(false);
 
   // const [isCreatingMember, setIsCreatingMember] = useState(false);
 
@@ -819,7 +819,7 @@ export default function MembersScreen() {
         gender: selectedGender,
         member_id: newMember.member_id,
         notes: newMember.notes || null,
-        joining_date: newMember.joining_date,
+        // joining_date: newMember.joining_date,
       };
 
       const { error: profileUpdateError } = await supabase
@@ -999,7 +999,7 @@ export default function MembersScreen() {
         profile_photo_uri: '',
         member_id: '',
         notes: '',
-        joining_date: new Date().toISOString().split('T')[0],
+        // joining_date: new Date().toISOString().split('T')[0],
       });
       setSelectedGender('male'); // ⭐ ADD THIS
       setAdmissionFee('50'); // ⭐ ADD THIS
@@ -3029,7 +3029,7 @@ ${gymName}`;
                   </View>
 
                   {/* Joining Date Field */}
-                  <View style={styles.inputGroup}>
+                  {/* <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>Joining Date *</Text>
                     <TouchableOpacity
                       style={[styles.input, styles.datePickerButton]}
@@ -3087,7 +3087,7 @@ ${gymName}`;
                         )}
                       </>
                     )}
-                  </View>
+                  </View> */}
 
 
                   <View style={styles.inputGroup}>
@@ -3406,7 +3406,7 @@ ${gymName}`;
                       </ScrollView>
                       {/* Custom Start Date with DatePicker */}
                       <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>Subscription Start Date</Text>
+                        <Text style={styles.inputLabel}>Joining Date</Text>
 
                         <TouchableOpacity
                           style={[styles.input, styles.datePickerButton]}

@@ -1,5 +1,5 @@
 /**
- * Invoice PDF/HTML generation utilities - CORRECTED & IMPROVED VERSION
+ * Invoice PDF/HTML generation utilities - WITH ADMISSION & DISCOUNT
  */
 
 import { formatRupees, formatCurrencyNumber } from './currency';
@@ -9,7 +9,7 @@ export interface Invoice {
   invoice_number: string;
   user_id: string;
   gym_id?: string;
-  amount: number; // Paid amount
+  amount: number;
   total_amount: number;
   currency: string;
   payment_type: string;
@@ -22,8 +22,10 @@ export interface Invoice {
   is_installment?: boolean;
   installment_number?: number;
   total_installments?: number;
-  original_total_amount?: number; 
+  original_total_amount?: number;
   remaining_amount?: number;
+  admission_fee?: number;
+  discount_amount?: number;
   gym?: {
     name: string;
     location?: string;
@@ -35,35 +37,47 @@ export interface Invoice {
     email: string;
     phone?: string;
   };
+  subscription?: {
+    name?: string;
+    price?: number;
+  };
 }
 
 /**
- * Calculate paid and remaining amounts correctly
+ * Calculate all amounts correctly
  */
 function calculateAmounts(invoice: Invoice) {
-  const originalTotal = invoice.original_total_amount || invoice.total_amount;
-  
+  // Get base subscription price from items or subscription relation
+  const subscriptionPrice = invoice.subscription?.price || 
+    (invoice.items && invoice.items[0]?.amount) || 
+    invoice.total_amount || 0;
+
+  // Get admission fee and discount
+  const admissionFee = invoice.admission_fee || 0;
+  const discountAmount = invoice.discount_amount || 0;
+
+  // Calculate subtotal: subscription + admission
+  const subtotal = subscriptionPrice + admissionFee;
+
+  // Calculate final total after discount
+  const finalTotal = Math.max(0, subtotal - discountAmount);
+
   // Amount paid
-  let paidAmount = invoice.amount;
-  
+  const paidAmount = invoice.amount || 0;
+
   // Remaining amount
-  let remainingAmount = invoice.remaining_amount !== undefined 
-    ? invoice.remaining_amount 
-    : Math.max(0, originalTotal - paidAmount);
+  const remainingAmount = invoice.remaining_amount !== undefined
+    ? invoice.remaining_amount
+    : Math.max(0, finalTotal - paidAmount);
 
-  // If status is completed/paid, ensure everything is correct
-  if (invoice.payment_status === 'completed' || invoice.payment_status === 'paid') {
-    paidAmount = originalTotal;
-    remainingAmount = 0;
-  }
-
-  const planAmount = originalTotal - (0);
-
-  return { 
-    paidAmount, 
-    remainingAmount, 
-    originalTotal,
-    planAmount 
+  return {
+    subscriptionPrice,
+    admissionFee,
+    discountAmount,
+    subtotal,
+    finalTotal,
+    paidAmount,
+    remainingAmount,
   };
 }
 
@@ -85,7 +99,15 @@ export function generateInvoiceHTML(invoice: Invoice): string {
       })
     : null;
 
-  const { paidAmount, remainingAmount, originalTotal, planAmount } = calculateAmounts(invoice);
+  const {
+    subscriptionPrice,
+    admissionFee,
+    discountAmount,
+    subtotal,
+    finalTotal,
+    paidAmount,
+    remainingAmount,
+  } = calculateAmounts(invoice);
 
   const paymentStatusText =
     invoice.payment_status === 'completed' || invoice.payment_status === 'paid'
@@ -100,6 +122,10 @@ export function generateInvoiceHTML(invoice: Invoice): string {
       : invoice.payment_status === 'partial'
       ? 'partial'
       : 'pending';
+
+  const planName = invoice.subscription?.name || 
+    (invoice.items && invoice.items[0]?.description) || 
+    'Gym Subscription';
 
   const html = `
 <!DOCTYPE html>
@@ -123,14 +149,14 @@ export function generateInvoiceHTML(invoice: Invoice): string {
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Arial', sans-serif;
       color: #1f2937;
-      line-height: 1.5;
+      line-height: 1.4;
       background: white;
     }
     
     .invoice-container {
       width: 210mm;
       min-height: 297mm;
-      padding: 15mm;
+      padding: 12mm;
       margin: 0 auto;
       background: white;
     }
@@ -139,13 +165,13 @@ export function generateInvoiceHTML(invoice: Invoice): string {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      margin-bottom: 25px;
-      padding-bottom: 15px;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
       border-bottom: 3px solid #3B82F6;
     }
     
     .logo {
-      font-size: 26px;
+      font-size: 24px;
       font-weight: 700;
       color: #3B82F6;
       letter-spacing: -0.5px;
@@ -156,14 +182,14 @@ export function generateInvoiceHTML(invoice: Invoice): string {
     }
     
     .invoice-title h1 {
-      font-size: 32px;
+      font-size: 28px;
       color: #1f2937;
       font-weight: 700;
       margin-bottom: 4px;
     }
     
     .invoice-number {
-      font-size: 13px;
+      font-size: 12px;
       color: #6b7280;
       font-weight: 500;
     }
@@ -171,8 +197,8 @@ export function generateInvoiceHTML(invoice: Invoice): string {
     .details {
       display: flex;
       justify-content: space-between;
-      margin-bottom: 25px;
-      gap: 30px;
+      margin-bottom: 20px;
+      gap: 25px;
     }
     
     .bill-to, .invoice-info {
@@ -180,17 +206,17 @@ export function generateInvoiceHTML(invoice: Invoice): string {
     }
     
     .section-title {
-      font-size: 11px;
+      font-size: 10px;
       color: #6b7280;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       text-transform: uppercase;
       letter-spacing: 1px;
       font-weight: 600;
     }
     
     .bill-to p, .invoice-info p {
-      margin: 4px 0;
-      font-size: 13px;
+      margin: 3px 0;
+      font-size: 12px;
       color: #374151;
     }
     
@@ -201,11 +227,11 @@ export function generateInvoiceHTML(invoice: Invoice): string {
     
     .status-badge {
       display: inline-block;
-      padding: 5px 12px;
+      padding: 4px 10px;
       border-radius: 6px;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
-      margin-top: 8px;
+      margin-top: 6px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
@@ -225,36 +251,23 @@ export function generateInvoiceHTML(invoice: Invoice): string {
       color: #991B1B;
     }
     
-    .installment-info {
-      background: #F0F9FF;
-      padding: 12px 15px;
-      border-radius: 8px;
-      margin: 20px 0;
-      border-left: 4px solid #3B82F6;
-      font-size: 13px;
-    }
-    
-    .installment-info strong {
-      color: #1e40af;
-    }
-    
     .items-section {
-      margin: 25px 0;
+      margin: 18px 0;
       background: #f9fafb;
-      padding: 20px;
+      padding: 15px;
       border-radius: 8px;
       border: 1px solid #e5e7eb;
     }
     
     .items-section h3 {
-      font-size: 14px;
+      font-size: 13px;
       color: #374151;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
       font-weight: 600;
     }
     
     .item {
-      padding: 10px 0;
+      padding: 8px 0;
       border-bottom: 1px solid #e5e7eb;
       display: flex;
       justify-content: space-between;
@@ -266,20 +279,20 @@ export function generateInvoiceHTML(invoice: Invoice): string {
     }
     
     .item-description {
-      font-size: 14px;
+      font-size: 13px;
       color: #1f2937;
       font-weight: 500;
     }
     
     .item-amount {
-      font-size: 14px;
+      font-size: 13px;
       color: #374151;
       font-weight: 600;
     }
     
     .amount-breakdown {
-      margin: 25px 0;
-      padding: 20px;
+      margin: 18px 0;
+      padding: 15px;
       background: linear-gradient(to bottom, #ffffff, #f9fafb);
       border: 2px solid #e5e7eb;
       border-radius: 10px;
@@ -288,8 +301,8 @@ export function generateInvoiceHTML(invoice: Invoice): string {
     .amount-row {
       display: flex;
       justify-content: space-between;
-      padding: 10px 0;
-      font-size: 14px;
+      padding: 8px 0;
+      font-size: 13px;
       border-bottom: 1px dashed #d1d5db;
     }
     
@@ -297,65 +310,51 @@ export function generateInvoiceHTML(invoice: Invoice): string {
       border-bottom: none;
     }
     
-    .amount-row.plan-amount {
+    .amount-row.highlight {
       background: #f0f9ff;
-      padding: 12px;
-      margin: -10px -10px 8px -10px;
+      padding: 10px;
+      margin: -8px -8px 6px -8px;
       border-radius: 6px;
       border: 1px solid #bfdbfe;
     }
     
-    .amount-row.plan-amount .label {
-      color: #1e40af;
-      font-weight: 600;
+    .amount-row.admission {
+      background: #fef3c7;
+      padding: 10px;
+      margin: 6px -8px;
+      border-radius: 6px;
+      border: 1px solid #fde68a;
     }
     
-    .amount-row.plan-amount .value {
-      color: #1e40af;
-      font-weight: 600;
-    }
-    
-    .amount-row.paid-amount {
+    .amount-row.discount {
       background: #d1fae5;
-      padding: 12px;
-      margin: 8px -10px;
+      padding: 10px;
+      margin: 6px -8px;
       border-radius: 6px;
       border: 1px solid #86efac;
     }
     
-    .amount-row.paid-amount .label {
-      color: #065f46;
-      font-weight: 600;
+    .amount-row.paid {
+      background: #d1fae5;
+      padding: 10px;
+      margin: 6px -8px;
+      border-radius: 6px;
+      border: 1px solid #86efac;
     }
     
-    .amount-row.paid-amount .value {
-      color: #065f46;
-      font-weight: 600;
-    }
-    
-    .amount-row.remaining-amount {
+    .amount-row.remaining {
       background: #fee2e2;
-      padding: 12px;
-      margin: 8px -10px;
+      padding: 10px;
+      margin: 6px -8px;
       border-radius: 6px;
       border: 1px solid #fca5a5;
     }
     
-    .amount-row.remaining-amount .label {
-      color: #991b1b;
-      font-weight: 600;
-    }
-    
-    .amount-row.remaining-amount .value {
-      color: #991b1b;
-      font-weight: 600;
-    }
-    
     .amount-row.total {
-      margin-top: 8px;
-      padding-top: 15px;
+      margin-top: 6px;
+      padding-top: 12px;
       border-top: 3px solid #3B82F6;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 700;
     }
     
@@ -369,19 +368,27 @@ export function generateInvoiceHTML(invoice: Invoice): string {
       font-weight: 600;
     }
     
+    .amount-row.highlight .label,
+    .amount-row.admission .label,
+    .amount-row.discount .label,
+    .amount-row.paid .label,
+    .amount-row.remaining .label {
+      font-weight: 600;
+    }
+    
     .payment-info {
       background: #f0f9ff;
-      padding: 15px;
+      padding: 12px;
       border-radius: 8px;
-      margin: 20px 0;
+      margin: 15px 0;
       border: 1px solid #bfdbfe;
     }
     
     .payment-info-row {
       display: flex;
       justify-content: space-between;
-      margin: 6px 0;
-      font-size: 13px;
+      margin: 5px 0;
+      font-size: 12px;
     }
     
     .payment-info-row strong {
@@ -394,42 +401,42 @@ export function generateInvoiceHTML(invoice: Invoice): string {
     }
     
     .gym-info {
-      margin-top: 25px;
-      padding: 15px;
+      margin-top: 18px;
+      padding: 12px;
       background: #f9fafb;
       border-radius: 8px;
       border: 1px solid #e5e7eb;
     }
     
     .gym-name {
-      font-size: 16px;
+      font-size: 14px;
       font-weight: 700;
       color: #1f2937;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
     
     .gym-info p {
-      font-size: 12px;
+      font-size: 11px;
       color: #6b7280;
-      margin: 4px 0;
+      margin: 3px 0;
     }
     
     .footer {
-      margin-top: 30px;
-      padding-top: 20px;
+      margin-top: 20px;
+      padding-top: 15px;
       border-top: 2px solid #e5e7eb;
       text-align: center;
     }
     
     .footer-thank-you {
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 600;
       color: #3B82F6;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
     
     .footer-note {
-      font-size: 11px;
+      font-size: 10px;
       color: #9ca3af;
     }
     
@@ -480,74 +487,54 @@ export function generateInvoiceHTML(invoice: Invoice): string {
       </div>
     </div>
 
-    ${
-      invoice.is_installment
-        ? `
-    <div class="installment-info">
-      <strong>Installment Payment:</strong> ${invoice.installment_number} of ${invoice.total_installments}
-    </div>
-    `
-        : ''
-    }
-
     <!-- Items Section -->
     <div class="items-section">
       <h3>Subscription Details</h3>
-      ${(invoice.items || [
-        {
-          description: 'Gym Subscription',
-          amount: planAmount,
-        },
-      ])
-        .map(
-          (item: any) => `
       <div class="item">
-        <div class="item-description">${item.description || 'Subscription'}</div>
-        <div class="item-amount">₹${formatCurrencyNumber(item.amount || planAmount)}</div>
+        <div class="item-description">${planName}</div>
+        <div class="item-amount">₹${formatCurrencyNumber(subscriptionPrice)}</div>
       </div>
-      `
-        )
-        .join('')}
     </div>
 
     <!-- Amount Breakdown -->
     <div class="amount-breakdown">
-      <div class="amount-row plan-amount">
-        <span class="label">Plan Amount</span>
-        <span class="value">₹${formatCurrencyNumber(planAmount)}</span>
+      <div class="amount-row highlight">
+        <span class="label">Subscription Amount</span>
+        <span class="value">₹${formatCurrencyNumber(subscriptionPrice)}</span>
       </div>
       
-      <div class="amount-row">
-        <span class="label">GST (18%)</span>
-        <span class="value">₹${formatCurrencyNumber(0)}</span>
+      ${admissionFee > 0 ? `
+      <div class="amount-row admission">
+        <span class="label">Admission Fee</span>
+        <span class="value">+ ₹${formatCurrencyNumber(admissionFee)}</span>
       </div>
+      ` : ''}
+      
+      ${discountAmount > 0 ? `
+      <div class="amount-row discount">
+        <span class="label">Discount Applied</span>
+        <span class="value">- ₹${formatCurrencyNumber(discountAmount)}</span>
+      </div>
+      ` : ''}
       
       <div class="amount-row total">
         <span class="label">Total Amount</span>
-        <span class="value">₹${formatCurrencyNumber(originalTotal)}</span>
+        <span class="value">₹${formatCurrencyNumber(finalTotal)}</span>
       </div>
       
-      ${
-        paidAmount > 0
-          ? `
-      <div class="amount-row paid-amount">
+      ${paidAmount > 0 ? `
+      <div class="amount-row paid">
         <span class="label">Paid Amount</span>
         <span class="value">₹${formatCurrencyNumber(paidAmount)}</span>
       </div>
-      `
-          : ''
-      }
+      ` : ''}
       
-      ${
-        remainingAmount > 0
-          ? `
-      <div class="amount-row remaining-amount">
+      ${remainingAmount > 0 ? `
+      <div class="amount-row remaining">
         <span class="label">Remaining Amount</span>
         <span class="value">₹${formatCurrencyNumber(remainingAmount)}</span>
       </div>
-      `
-          : ''
-      }
+      ` : ''}
     </div>
 
     <!-- Payment Information -->
@@ -608,15 +595,17 @@ export function generateInvoiceHTML(invoice: Invoice): string {
  * Format invoice for display in UI
  */
 export function formatInvoiceForDisplay(invoice: any) {
-  const { paidAmount, remainingAmount, originalTotal, planAmount } = calculateAmounts(invoice);
+  const amounts = calculateAmounts(invoice);
 
   return {
     ...invoice,
-    formattedPlanAmount: formatRupees(planAmount),
-    formattedAmount: formatRupees(invoice.amount),
-    formattedTotal: formatRupees(originalTotal),
-    formattedPaid: formatRupees(paidAmount),
-    formattedRemaining: formatRupees(remainingAmount),
+    formattedSubscriptionPrice: formatRupees(amounts.subscriptionPrice),
+    formattedAdmissionFee: formatRupees(amounts.admissionFee),
+    formattedDiscount: formatRupees(amounts.discountAmount),
+    formattedSubtotal: formatRupees(amounts.subtotal),
+    formattedTotal: formatRupees(amounts.finalTotal),
+    formattedPaid: formatRupees(amounts.paidAmount),
+    formattedRemaining: formatRupees(amounts.remainingAmount),
     formattedDate: new Date(invoice.invoice_date).toLocaleDateString('en-IN', {
       year: 'numeric',
       month: 'short',

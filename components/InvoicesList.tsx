@@ -1,4 +1,4 @@
-// InvoicesList.tsx - Add this component to your Members Screen
+// InvoicesList.tsx - CORRECTED with proper amount calculations
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -24,7 +24,10 @@ import {
   CheckCircle,
   AlertCircle,
   Mail,
-  MessageCircle
+  MessageCircle,
+  DollarSign,
+  Tag,
+  Percent
 } from 'lucide-react-native';
 import { formatRupees } from '@/lib/currency';
 import { generateInvoiceHTML } from '@/lib/invoicePDF';
@@ -70,7 +73,8 @@ interface Invoice {
   total_installments?: number;
   original_total_amount?: number;
   remaining_amount?: number;
-  // Relations
+  admission_fee?: number;
+  discount_amount?: number;
   user?: {
     full_name: string;
     email: string;
@@ -81,6 +85,17 @@ interface Invoice {
     location?: string;
     phone?: string;
     email?: string;
+  };
+  subscription?: {
+    name?: string;
+    price?: number;
+  };
+  userSubscription?: {
+    admission_fee?: number;
+    discount_amount?: number;
+    total_amount?: number;
+    paid_amount?: number;
+    pending_amount?: number;
   };
 }
 
@@ -95,7 +110,7 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [processingInvoiceId, setProcessingInvoiceId] = useState<string | null>(null);
-  // Platform check
+
   const isWeb = Platform.OS === 'web';
 
   useEffect(() => {
@@ -103,28 +118,16 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
   }, [userId]);
 
   const parseInvoiceItems = (items: any): any[] => {
-    // Handle if items is already an array
-    if (Array.isArray(items)) {
-      return items;
-    }
-
-    // Handle if items is a JSON string
+    if (Array.isArray(items)) return items;
     if (typeof items === 'string') {
       try {
         const parsed = JSON.parse(items);
         return Array.isArray(parsed) ? parsed : [parsed];
       } catch (e) {
-        console.error('Error parsing items:', e);
         return [];
       }
     }
-
-    // Handle if items is an object
-    if (items && typeof items === 'object') {
-      return [items];
-    }
-
-    // Default empty array
+    if (items && typeof items === 'object') return [items];
     return [];
   };
 
@@ -134,20 +137,45 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
       const { data, error } = await supabase
         .from('invoices')
         .select(`
-    *,
-    user:profiles!invoices_user_id_fkey(full_name, email, phone),
-    gym:gyms(name, location, phone, email)
-  `)
+          *,
+          user:profiles!invoices_user_id_fkey(full_name, email, phone),
+          gym:gyms(name, location, phone, email),
+          subscription:user_subscriptions!invoices_subscription_id_fkey(
+            subscription:subscription_id(name, price),
+            admission_fee,
+            discount_amount,
+            total_amount,
+            paid_amount,
+            pending_amount
+          )
+        `)
         .eq('user_id', userId)
         .order('invoice_date', { ascending: false });
 
       if (error) throw error;
 
-      // Parse items for each invoice
-      const parsedInvoices = (data || []).map(invoice => ({
-        ...invoice,
-        items: parseInvoiceItems(invoice.items)
-      }));
+      const parsedInvoices = (data || []).map(invoice => {
+        // Extract data from nested subscription object
+        const userSubscriptionData = invoice.subscription;
+        const subscriptionPlan = userSubscriptionData?.subscription;
+
+        // Get admission_fee and discount_amount from user_subscriptions table
+        const admissionFee = invoice.admission_fee || 
+          userSubscriptionData?.admission_fee || 0;
+        const discountAmount = invoice.discount_amount || 
+          userSubscriptionData?.discount_amount || 0;
+
+        return {
+          ...invoice,
+          items: parseInvoiceItems(invoice.items),
+          subscription: subscriptionPlan || null,
+          // Store user_subscriptions data separately
+          userSubscription: userSubscriptionData,
+          // Ensure these fields are at the top level
+          admission_fee: admissionFee,
+          discount_amount: discountAmount,
+        };
+      });
 
       setInvoices(parsedInvoices);
     } catch (error) {
@@ -158,9 +186,45 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
     }
   };
 
+  const calculateAmounts = (invoice: Invoice) => {
+    // Get subscription price from subscription plan
+    const subscriptionPrice = invoice.subscription?.price || 0;
+
+    // Get admission fee and discount from invoice OR userSubscription
+    const admissionFee = invoice.admission_fee || 
+      invoice.userSubscription?.admission_fee || 0;
+    
+    const discountAmount = invoice.discount_amount || 
+      invoice.userSubscription?.discount_amount || 0;
+
+    // Calculate subtotal and final total
+    const subtotal = subscriptionPrice + admissionFee;
+    const finalTotal = Math.max(0, subtotal - discountAmount);
+
+    // Get paid amount - use userSubscription data if available
+    const paidAmount = invoice.userSubscription?.paid_amount || 
+      invoice.amount || 0;
+
+    // Calculate remaining amount
+    const remainingAmount = invoice.userSubscription?.pending_amount !== undefined
+      ? invoice.userSubscription.pending_amount
+      : (invoice.remaining_amount !== undefined
+        ? invoice.remaining_amount
+        : Math.max(0, finalTotal - paidAmount));
+
+    return {
+      subscriptionPrice,
+      admissionFee,
+      discountAmount,
+      subtotal,
+      finalTotal,
+      paidAmount,
+      remainingAmount,
+    };
+  };
+
   const generatePDFForSharing = async (invoice: Invoice): Promise<string | null> => {
     try {
-      // Ensure items are parsed
       const invoiceWithParsedItems = {
         ...invoice,
         items: parseInvoiceItems(invoice.items)
@@ -172,13 +236,11 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
         throw new Error('Failed to generate invoice HTML');
       }
 
-      // Web platform
       if (Platform.OS === 'web') {
         const { uri } = await Print.printToFileAsync({ html });
         return uri;
       }
 
-      // Mobile platforms - use base64 for better compatibility
       const { uri } = await Print.printToFileAsync({
         html,
         base64: false,
@@ -195,83 +257,80 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
   const handleSendWhatsApp = async (invoice: Invoice) => {
     try {
       setProcessingInvoiceId(invoice.id);
-  
-      // Web platform check
+
       if (Platform.OS === 'web') {
         Alert.alert('Not Supported on Web', 'WhatsApp sharing is only available on mobile devices.');
         setProcessingInvoiceId(null);
         return;
       }
-  
+
       // Fetch phone number
       let phoneNumber = null;
-      
       try {
         const { data: userData, error: userError } = await supabase
           .from('profiles')
           .select('phone')
           .eq('id', userId)
           .single();
-        
+
         if (userError) throw userError;
-        
         phoneNumber = userData?.phone?.replace(/[^0-9]/g, '');
       } catch (error) {
         console.error('Error fetching user phone:', error);
       }
-  
+
       if (!phoneNumber) {
-        Alert.alert('Error', 'Member phone number not found. Please add a phone number for this member in their profile.');
+        Alert.alert('Error', 'Member phone number not found. Please add a phone number for this member.');
         setProcessingInvoiceId(null);
         return;
       }
-  
-      // Validate phone number length
+
       if (phoneNumber.length < 10) {
         Alert.alert('Error', 'Invalid phone number. Please check the member\'s phone number.');
         setProcessingInvoiceId(null);
         return;
       }
-  
-      // Add country code if not present
+
       if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
         phoneNumber = '91' + phoneNumber;
       }
-  
+
       // Generate PDF first
       const pdfUri = await generatePDFForSharing(invoice);
       if (!pdfUri) {
         setProcessingInvoiceId(null);
         return;
       }
-  
-      const paidAmount = calculatePaidAmount(invoice);
-      const remainingAmount = calculateRemainingAmount(invoice);
-  
-      const message = `Hello ${invoice.user?.full_name || 'Member'},
-  
-  Your invoice ${invoice.invoice_number} is ready.
-  
-  *Invoice Details:*
-  Amount: ${formatRupees(invoice.total_amount)}
-  Paid: ${formatRupees(paidAmount)}
-  ${remainingAmount > 0 ? `Remaining: ${formatRupees(remainingAmount)}` : ''}
-  Status: ${invoice.payment_status.toUpperCase()}
-  Date: ${new Date(invoice.invoice_date).toLocaleDateString('en-IN')}
-  
-  Thank you!
-  ${invoice.gym?.name || 'Gym'}`;
-  
-      // Try different WhatsApp URL formats
+
+      const { paidAmount, remainingAmount, finalTotal, admissionFee, discountAmount } = calculateAmounts(invoice);
+
+      const message = `Hello ${invoice.user?.full_name || 'Member'} 👋
+
+Your invoice ${invoice.invoice_number} is ready!
+
+*Invoice Details:*
+${invoice.subscription?.name || 'Subscription'} Plan
+${admissionFee > 0 ? `Admission Fee: ${formatRupees(admissionFee)}\n` : ''}${discountAmount > 0 ? `Discount: -${formatRupees(discountAmount)}\n` : ''}
+━━━━━━━━━━━━━━━━━━━━
+Total Amount: ${formatRupees(finalTotal)}
+Paid: ${formatRupees(paidAmount)} ✅
+${remainingAmount > 0 ? `Remaining: ${formatRupees(remainingAmount)} ⚠️\n` : ''}
+Status: ${invoice.payment_status.toUpperCase()}
+Date: ${new Date(invoice.invoice_date).toLocaleDateString('en-IN')}
+
+📄 Invoice PDF is attached below.
+
+Thank you for your business!
+${invoice.gym?.name || 'Gym Team'}`;
+
+      // Try WhatsApp URLs
       const whatsappUrls = [
         `whatsapp://send?phone=${phoneNumber}&text=${encodeURIComponent(message)}`,
         `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`,
         `https://api.whatsapp.com/send?phone=${phoneNumber}&text=${encodeURIComponent(message)}`
       ];
-  
+
       let whatsappOpened = false;
-  
-      // Try opening WhatsApp with message
       for (const url of whatsappUrls) {
         try {
           const canOpen = await Linking.canOpenURL(url);
@@ -284,53 +343,37 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
           continue;
         }
       }
-  
+
       if (!whatsappOpened) {
         Alert.alert(
           'WhatsApp Not Available',
-          'WhatsApp is not installed on this device. Would you like to share the invoice another way?',
+          'WhatsApp is not installed. Would you like to share the invoice another way?',
           [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Share', onPress: () => handleDownloadInvoice(invoice) }
+            { text: 'Cancel', style: 'cancel', onPress: () => setProcessingInvoiceId(null) },
+            { text: 'Share PDF', onPress: () => handleDownloadInvoice(invoice) }
           ]
         );
-        setProcessingInvoiceId(null);
         return;
       }
-  
-      // Show alert with instructions and option to share PDF
-      Alert.alert(
-        'Share Invoice PDF',
-        'WhatsApp chat opened. Now share the invoice PDF?',
-        [
-          { 
-            text: 'Cancel', 
-            style: 'cancel',
-            onPress: () => setProcessingInvoiceId(null)
-          },
-          { 
-            text: 'Share PDF', 
-            onPress: async () => {
-              try {
-                const shareAvailable = await Sharing.isAvailableAsync();
-                if (shareAvailable) {
-                  await Sharing.shareAsync(pdfUri, {
-                    mimeType: 'application/pdf',
-                    dialogTitle: `Invoice ${invoice.invoice_number}`,
-                    UTI: 'com.adobe.pdf',
-                  });
-                }
-              } catch (shareError) {
-                console.error('Share error:', shareError);
-                Alert.alert('Error', 'Failed to share PDF');
-              } finally {
-                setProcessingInvoiceId(null);
-              }
-            }
+
+      // Wait a moment for WhatsApp to open, then share PDF
+      setTimeout(async () => {
+        try {
+          const shareAvailable = await Sharing.isAvailableAsync();
+          if (shareAvailable) {
+            await Sharing.shareAsync(pdfUri, {
+              mimeType: 'application/pdf',
+              dialogTitle: `Invoice ${invoice.invoice_number}`,
+              UTI: 'com.adobe.pdf',
+            });
           }
-        ]
-      );
-  
+        } catch (shareError) {
+          console.error('Share error:', shareError);
+        } finally {
+          setProcessingInvoiceId(null);
+        }
+      }, 1500);
+
     } catch (error: any) {
       console.error('Error sending WhatsApp:', error);
       Alert.alert('Error', 'Failed to send via WhatsApp: ' + (error?.message || 'Unknown error'));
@@ -349,74 +392,65 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
         return;
       }
 
-      // Web platform
       if (Platform.OS === 'web') {
         Alert.alert('Not Supported on Web', 'Please use the mobile app to send emails with attachments.');
         setProcessingInvoiceId(null);
         return;
       }
 
-      // Mobile platforms - check email availability
       const isAvailable = await MailComposer.isAvailableAsync();
       if (!isAvailable) {
-        Alert.alert('Error', 'Email is not configured on this device. Please set up an email account in your device settings.');
+        Alert.alert('Error', 'Email is not configured on this device.');
         setProcessingInvoiceId(null);
         return;
       }
 
-      // Generate PDF first
       const pdfUri = await generatePDFForSharing(invoice);
       if (!pdfUri) {
         setProcessingInvoiceId(null);
         return;
       }
 
-      const paidAmount = calculatePaidAmount(invoice);
-      const remainingAmount = calculateRemainingAmount(invoice);
+      const { paidAmount, remainingAmount, finalTotal, admissionFee, discountAmount, subscriptionPrice } = calculateAmounts(invoice);
 
       const emailSubject = `Invoice ${invoice.invoice_number} - ${invoice.gym?.name || 'Gym'}`;
       const emailBody = `Dear ${invoice.user?.full_name || 'Member'},
-  
-  Please find attached your invoice.
-  
-  Invoice Details:
-  ━━━━━━━━━━━━━━━━━━━━
-  Invoice Number: ${invoice.invoice_number}
-  Date: ${new Date(invoice.invoice_date).toLocaleDateString('en-IN', {
+
+Please find attached your invoice.
+
+Invoice Details:
+━━━━━━━━━━━━━━━━━━━━
+Invoice Number: ${invoice.invoice_number}
+Date: ${new Date(invoice.invoice_date).toLocaleDateString('en-IN', {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
       })}
-  
-  Amount Details:
-  ━━━━━━━━━━━━━━━━━━━━
-  Total Amount: ${formatRupees(invoice.total_amount)}
-  Paid Amount: ${formatRupees(paidAmount)}
-  ${remainingAmount > 0 ? `Remaining: ${formatRupees(remainingAmount)}` : ''}
-  Status: ${invoice.payment_status.toUpperCase()}
-  
-  Thank you for your payment!
-  
-  Best regards,
-  ${invoice.gym?.name || 'Gym Team'}`;
 
-      // Prepare attachment based on platform
+Amount Details:
+━━━━━━━━━━━━━━━━━━━━
+Subscription: ${formatRupees(subscriptionPrice)}
+${admissionFee > 0 ? `Admission Fee: ${formatRupees(admissionFee)}\n` : ''}${discountAmount > 0 ? `Discount: -${formatRupees(discountAmount)}\n` : ''}Total Amount: ${formatRupees(finalTotal)}
+Paid Amount: ${formatRupees(paidAmount)}
+${remainingAmount > 0 ? `Remaining: ${formatRupees(remainingAmount)}\n` : ''}Status: ${invoice.payment_status.toUpperCase()}
+
+Thank you for your payment!
+
+Best regards,
+${invoice.gym?.name || 'Gym Team'}`;
+
       let finalAttachmentPath = pdfUri;
 
       if (Platform.OS === 'android') {
-        // Android needs a proper file path
         const fileName = `Invoice_${invoice.invoice_number.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
         const newPath = `${FileSystem.documentDirectory}${fileName}`;
-
         await FileSystem.copyAsync({
           from: pdfUri,
           to: newPath,
         });
-
         finalAttachmentPath = newPath;
       }
 
-      // Compose email with attachment
       const result = await MailComposer.composeAsync({
         recipients: [userEmail],
         subject: emailSubject,
@@ -429,8 +463,6 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
         Alert.alert('Success', 'Invoice email sent successfully!');
       } else if (result.status === 'saved') {
         Alert.alert('Saved', 'Email saved to drafts');
-      } else if (result.status === 'cancelled') {
-        Alert.alert('Cancelled', 'Email sending was cancelled');
       }
 
       setProcessingInvoiceId(null);
@@ -451,7 +483,6 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
         return;
       }
 
-      // Web platform
       if (Platform.OS === 'web') {
         const link = document.createElement('a');
         link.href = pdfUri;
@@ -465,7 +496,6 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
         return;
       }
 
-      // Mobile platforms
       const shareAvailable = await Sharing.isAvailableAsync();
 
       if (shareAvailable) {
@@ -474,10 +504,6 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
           dialogTitle: `Save Invoice ${invoice.invoice_number}`,
           UTI: 'com.adobe.pdf',
         });
-
-        if (Platform.OS === 'android') {
-          Alert.alert('Success', 'Invoice ready to save! Choose a location from the share menu.');
-        }
       } else {
         Alert.alert('Error', 'Sharing is not available on this device');
       }
@@ -524,59 +550,6 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
     }
   };
 
-  const calculatePaidAmount = (invoice: Invoice): number => {
-    if (!invoice) return 0;
-
-    const status = invoice.payment_status?.toLowerCase();
-
-    // For completed/paid status, return the amount that was actually paid
-    // This should be the amount field, not total_amount
-    if (status === 'completed' || status === 'paid') {
-      return invoice.total_amount || 0;
-    }
-
-    if (status === 'partial') {
-      const totalAmount = invoice.total_amount || 0;      
-      const remainingAmount = invoice.remaining_amount || 0; 
-      return Math.max(0, totalAmount - remainingAmount); 
-    }
-
-    if (status === 'pending') {
-      return 0;
-    }
-
-    return invoice.amount || 0;
-  };
-
-  const calculateRemainingAmount = (invoice: Invoice): number => {
-    if (!invoice) return 0;
-
-    const status = invoice.payment_status?.toLowerCase();
-
-    if (status === 'completed' || status === 'paid') {
-      return 0;
-    }
-
-    // If remaining_amount is explicitly set, use it
-    if (invoice.remaining_amount !== undefined && invoice.remaining_amount !== null) {
-      return Math.max(0, invoice.remaining_amount);
-    }
-
-    // For partial payments
-    if (status === 'partial') {
-      const totalAmount = invoice.original_total_amount || invoice.total_amount || 0;
-      const paidAmount = invoice.amount || 0;
-      return Math.max(0, totalAmount - paidAmount);
-    }
-
-    // For pending payments, entire amount is remaining
-    if (status === 'pending') {
-      return invoice.total_amount || 0;
-    }
-
-    return 0;
-  };
-
   return (
     <View style={styles.container}>
       <View style={styles.sectionHeader}>
@@ -596,6 +569,7 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
         invoices.map((invoice) => {
           const statusBadge = getPaymentStatusBadge(invoice.payment_status);
           const StatusIcon = statusBadge.icon;
+          const { finalTotal } = calculateAmounts(invoice);
 
           return (
             <Card key={invoice.id} style={styles.invoiceCard}>
@@ -628,7 +602,7 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
                   </View>
                   <View style={styles.invoiceRight}>
                     <Text style={styles.invoiceAmount}>
-                      {formatRupees(invoice.total_amount)}
+                      {formatRupees(finalTotal)}
                     </Text>
                     <View style={styles.invoiceActions}>
                       <TouchableOpacity
@@ -698,72 +672,50 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
               contentContainerStyle={styles.modalContent}
               showsVerticalScrollIndicator={false}
             >
-              {selectedInvoice && (
-                <>
-                  {/* Status Card */}
-                  <Card style={styles.statusCard}>
-                    <View style={styles.statusCardHeader}>
-                      {(() => {
-                        const badge = getPaymentStatusBadge(selectedInvoice.payment_status);
-                        const StatusIcon = badge.icon;
-                        return (
-                          <View
-                            style={[
-                              styles.statusBadgeLarge,
-                              { backgroundColor: badge.bg },
-                            ]}
-                          >
-                            <StatusIcon size={20} color={badge.color} />
-                            <Text
-                              style={[styles.statusTextLarge, { color: badge.color }]}
-                            >
-                              Payment {badge.text}
-                            </Text>
-                          </View>
-                        );
-                      })()}
-                    </View>
-                  </Card>
-
-                  {/* Invoice Info */}
-                  <Card style={styles.detailCard}>
-                    <Text style={styles.detailCardTitle}>Invoice Information</Text>
-
-                    <View style={styles.detailRow}>
-                      <View style={styles.detailIcon}>
-                        <FileText size={16} color={COLORS.textSecondary} />
+              {selectedInvoice && (() => {
+                const amounts = calculateAmounts(selectedInvoice);
+                return (
+                  <>
+                    {/* Status Card */}
+                    <Card style={styles.statusCard}>
+                      <View style={styles.statusCardHeader}>
+                        {(() => {
+                          const badge = getPaymentStatusBadge(selectedInvoice.payment_status);
+                          const StatusIcon = badge.icon;
+                          return (
+                            <View style={[styles.statusBadgeLarge, { backgroundColor: badge.bg }]}>
+                              <StatusIcon size={20} color={badge.color} />
+                              <Text style={[styles.statusTextLarge, { color: badge.color }]}>
+                                Payment {badge.text}
+                              </Text>
+                            </View>
+                          );
+                        })()}
                       </View>
-                      <View style={styles.detailContent}>
-                        <Text style={styles.detailLabel}>Invoice Number</Text>
-                        <Text style={styles.detailValue}>{selectedInvoice.invoice_number}</Text>
-                      </View>
-                    </View>
+                    </Card>
 
-                    <View style={styles.detailRow}>
-                      <View style={styles.detailIcon}>
-                        <Calendar size={16} color={COLORS.textSecondary} />
-                      </View>
-                      <View style={styles.detailContent}>
-                        <Text style={styles.detailLabel}>Invoice Date</Text>
-                        <Text style={styles.detailValue}>
-                          {new Date(selectedInvoice.invoice_date).toLocaleDateString('en-IN', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric',
-                          })}
-                        </Text>
-                      </View>
-                    </View>
+                    {/* Invoice Info */}
+                    <Card style={styles.detailCard}>
+                      <Text style={styles.detailCardTitle}>Invoice Information</Text>
 
-                    {selectedInvoice.due_date && (
+                      <View style={styles.detailRow}>
+                        <View style={styles.detailIcon}>
+                          <FileText size={16} color={COLORS.textSecondary} />
+                        </View>
+                        <View style={styles.detailContent}>
+                          <Text style={styles.detailLabel}>Invoice Number</Text>
+                          <Text style={styles.detailValue}>{selectedInvoice.invoice_number}</Text>
+                        </View>
+                      </View>
+
                       <View style={styles.detailRow}>
                         <View style={styles.detailIcon}>
                           <Calendar size={16} color={COLORS.textSecondary} />
                         </View>
                         <View style={styles.detailContent}>
-                          <Text style={styles.detailLabel}>Due Date</Text>
+                          <Text style={styles.detailLabel}>Invoice Date</Text>
                           <Text style={styles.detailValue}>
-                            {new Date(selectedInvoice.due_date).toLocaleDateString('en-IN', {
+                            {new Date(selectedInvoice.invoice_date).toLocaleDateString('en-IN', {
                               year: 'numeric',
                               month: 'long',
                               day: 'numeric',
@@ -771,119 +723,126 @@ export default function InvoicesList({ userId, onRefresh }: InvoicesListProps) {
                           </Text>
                         </View>
                       </View>
-                    )}
 
-                    <View style={styles.detailRow}>
-                      <View style={styles.detailIcon}>
-                        <CreditCard size={16} color={COLORS.textSecondary} />
-                      </View>
-                      <View style={styles.detailContent}>
-                        <Text style={styles.detailLabel}>Payment Method</Text>
-                        <Text style={styles.detailValue}>
-                          {selectedInvoice.payment_type?.toUpperCase() || 'N/A'}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {selectedInvoice.gym && (
                       <View style={styles.detailRow}>
                         <View style={styles.detailIcon}>
-                          <Building2 size={16} color={COLORS.textSecondary} />
+                          <CreditCard size={16} color={COLORS.textSecondary} />
                         </View>
                         <View style={styles.detailContent}>
-                          <Text style={styles.detailLabel}>Gym Name</Text>
-                          <Text style={styles.detailValue}>{selectedInvoice.gym.name}</Text>
+                          <Text style={styles.detailLabel}>Payment Method</Text>
+                          <Text style={styles.detailValue}>
+                            {selectedInvoice.payment_type?.toUpperCase() || 'N/A'}
+                          </Text>
                         </View>
                       </View>
-                    )}
-                  </Card>
 
-                  {/* Amount Breakdown */}
-                  <Card style={styles.detailCard}>
-                    <Text style={styles.detailCardTitle}>Amount Details</Text>
-
-                    <View style={styles.amountRow}>
-                      <Text style={styles.amountLabel}>Subtotal</Text>
-                      <Text style={styles.amountValue}>
-                        {formatRupees(selectedInvoice.amount)}
-                      </Text>
-                    </View>
-
-                    <View style={styles.amountRow}>
-                      <Text style={styles.amountLabel}>GST/Tax</Text>
-                      <Text style={styles.amountValue}>
-                        {formatRupees(selectedInvoice.total_amount - selectedInvoice.amount)}
-                      </Text>
-                    </View>
-
-                    <View style={[styles.amountRow, styles.amountRowDivider]}>
-                      <Text style={styles.amountLabelTotal}>Total Amount</Text>
-                      <Text style={styles.amountValueTotal}>
-                        {formatRupees(selectedInvoice.total_amount)}
-                      </Text>
-                    </View>
-
-                    <View style={styles.amountRow}>
-                      <Text style={styles.amountLabel}>Paid Amount</Text>
-                      <Text style={[styles.amountValue, { color: COLORS.success }]}>
-                        {formatRupees(calculatePaidAmount(selectedInvoice))}
-                      </Text>
-                    </View>
-
-                    {calculateRemainingAmount(selectedInvoice) > 0 && (
-                      <View style={styles.amountRow}>
-                        <Text style={styles.amountLabel}>Remaining Amount</Text>
-                        <Text style={[styles.amountValue, { color: COLORS.error }]}>
-                          {formatRupees(calculateRemainingAmount(selectedInvoice))}
-                        </Text>
-                      </View>
-                    )}
-                  </Card>
-
-                  {/* Installment Info */}
-                  {selectedInvoice.is_installment && (
-                    <Card style={styles.detailCard}>
-                      <Text style={styles.detailCardTitle}>Installment Information</Text>
-                      <View style={styles.installmentInfo}>
-                        <Text style={styles.installmentText}>
-                          Installment {selectedInvoice.installment_number} of{' '}
-                          {selectedInvoice.total_installments}
-                        </Text>
-                      </View>
+                      {selectedInvoice.gym && (
+                        <View style={styles.detailRow}>
+                          <View style={styles.detailIcon}>
+                            <Building2 size={16} color={COLORS.textSecondary} />
+                          </View>
+                          <View style={styles.detailContent}>
+                            <Text style={styles.detailLabel}>Gym Name</Text>
+                            <Text style={styles.detailValue}>{selectedInvoice.gym.name}</Text>
+                          </View>
+                        </View>
+                      )}
                     </Card>
-                  )}
 
-                  {/* Actions */}
-                  <View style={styles.actionButtons}>
-                    <Button
-                      title="Send via WhatsApp"
-                      onPress={() => handleSendWhatsApp(selectedInvoice)}
-                      isLoading={processingInvoiceId === selectedInvoice.id}
-                      disabled={Platform.OS === 'web'}
-                      style={[
-                        styles.actionButtonLarge,
-                        { backgroundColor: Platform.OS === 'web' ? COLORS.textSecondary : '#25D366' }
-                      ]}
-                    />
-                    <Button
-                      title="Send via Email"
-                      onPress={() => handleSendEmail(selectedInvoice)}
-                      isLoading={processingInvoiceId === selectedInvoice.id}
-                      disabled={Platform.OS === 'web'}
-                      style={[
-                        styles.actionButtonLarge,
-                        Platform.OS === 'web' && { backgroundColor: COLORS.textSecondary }
-                      ]}
-                    />
-                    <Button
-                      title="Download Invoice"
-                      onPress={() => handleDownloadInvoice(selectedInvoice)}
-                      isLoading={processingInvoiceId === selectedInvoice.id}
-                      style={styles.downloadButtonLarge}
-                    />
-                  </View>
-                </>
-              )}
+                    {/* Amount Breakdown */}
+                    <Card style={styles.detailCard}>
+                      <Text style={styles.detailCardTitle}>Amount Details</Text>
+
+                      <View style={styles.amountRow}>
+                        <View style={styles.amountRowLeft}>
+                          <DollarSign size={16} color={COLORS.primary} />
+                          <Text style={styles.amountLabel}>Subscription Amount</Text>
+                        </View>
+                        <Text style={styles.amountValue}>
+                          {formatRupees(amounts.subscriptionPrice)}
+                        </Text>
+                      </View>
+
+                      {amounts.admissionFee > 0 && (
+                        <View style={[styles.amountRow, styles.admissionRow]}>
+                          <View style={styles.amountRowLeft}>
+                            <Tag size={16} color={COLORS.warning} />
+                            <Text style={styles.amountLabel}>Admission Fee</Text>
+                          </View>
+                          <Text style={[styles.amountValue, { color: COLORS.warning }]}>
+                            + {formatRupees(amounts.admissionFee)}
+                          </Text>
+                        </View>
+                      )}
+
+                      {amounts.discountAmount > 0 && (
+                        <View style={[styles.amountRow, styles.discountRow]}>
+                          <View style={styles.amountRowLeft}>
+                            <Percent size={16} color={COLORS.success} />
+                            <Text style={styles.amountLabel}>Discount Applied</Text>
+                          </View>
+                          <Text style={[styles.amountValue, { color: COLORS.success }]}>
+                            - {formatRupees(amounts.discountAmount)}
+                          </Text>
+                        </View>
+                      )}
+
+                      <View style={[styles.amountRow, styles.amountRowDivider]}>
+                        <Text style={styles.amountLabelTotal}>Total Amount</Text>
+                        <Text style={styles.amountValueTotal}>
+                          {formatRupees(amounts.finalTotal)}
+                        </Text>
+                      </View>
+
+                      <View style={styles.amountRow}>
+                        <Text style={styles.amountLabel}>Paid Amount</Text>
+                        <Text style={[styles.amountValue, { color: COLORS.success, fontWeight: '700' }]}>
+                          {formatRupees(amounts.paidAmount)}
+                        </Text>
+                      </View>
+
+                      {amounts.remainingAmount > 0 && (
+                        <View style={styles.amountRow}>
+                          <Text style={styles.amountLabel}>Remaining Amount</Text>
+                          <Text style={[styles.amountValue, { color: COLORS.error, fontWeight: '700' }]}>
+                            {formatRupees(amounts.remainingAmount)}
+                          </Text>
+                        </View>
+                      )}
+                    </Card>
+
+                    {/* Actions */}
+                    <View style={styles.actionButtons}>
+                      <Button
+                        title="📱 Send via WhatsApp"
+                        onPress={() => handleSendWhatsApp(selectedInvoice)}
+                        isLoading={processingInvoiceId === selectedInvoice.id}
+                        disabled={Platform.OS === 'web'}
+                        style={[
+                          styles.actionButtonLarge,
+                          { backgroundColor: Platform.OS === 'web' ? COLORS.textSecondary : '#25D366' }
+                        ]}
+                      />
+                      <Button
+                        title="✉️ Send via Email"
+                        onPress={() => handleSendEmail(selectedInvoice)}
+                        isLoading={processingInvoiceId === selectedInvoice.id}
+                        disabled={Platform.OS === 'web'}
+                        style={[
+                          styles.actionButtonLarge,
+                          Platform.OS === 'web' && { backgroundColor: COLORS.textSecondary }
+                        ]}
+                      />
+                      <Button
+                        title="⬇️ Download Invoice"
+                        onPress={() => handleDownloadInvoice(selectedInvoice)}
+                        isLoading={processingInvoiceId === selectedInvoice.id}
+                        style={styles.downloadButtonLarge}
+                      />
+                    </View>
+                  </>
+                );
+              })()}
             </ScrollView>
           </View>
         </SafeAreaView>
@@ -924,28 +883,29 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 48,
-    borderRadius: 16,
+    paddingHorizontal: 24,
   },
   emptyText: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
     color: COLORS.text,
     marginTop: 16,
-    marginBottom: 8,
   },
   emptySubtext: {
     fontSize: 14,
     color: COLORS.textSecondary,
+    marginTop: 4,
   },
   invoiceCard: {
     marginBottom: 12,
     padding: 16,
-    borderRadius: 16,
   },
   invoiceHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    gap: 12,
   },
   invoiceIconContainer: {
     width: 40,
@@ -954,41 +914,41 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
   invoiceInfo: {
     flex: 1,
+    gap: 4,
   },
   invoiceNumber: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.text,
-    marginBottom: 4,
   },
   invoiceDate: {
     fontSize: 13,
     color: COLORS.textSecondary,
-    marginBottom: 8,
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    gap: 4,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 8,
+    borderRadius: 6,
+    gap: 4,
+    marginTop: 4,
   },
   statusText: {
     fontSize: 11,
     fontWeight: '600',
+    textTransform: 'uppercase',
   },
   invoiceRight: {
     alignItems: 'flex-end',
     gap: 8,
   },
   invoiceAmount: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: COLORS.text,
   },
@@ -999,7 +959,7 @@ const styles = StyleSheet.create({
   actionButton: {
     width: 32,
     height: 32,
-    borderRadius: 8,
+    borderRadius: 16,
     backgroundColor: COLORS.background,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1018,24 +978,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     paddingHorizontal: 20,
-    paddingVertical: 20,
+    paddingVertical: 16,
     backgroundColor: COLORS.cardBg,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
   modalTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
     color: COLORS.text,
-    marginBottom: 4,
   },
   modalSubtitle: {
     fontSize: 14,
     color: COLORS.textSecondary,
+    marginTop: 2,
   },
   closeButton: {
-    padding: 8,
-    borderRadius: 8,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
     backgroundColor: COLORS.background,
   },
   modalScrollView: {
@@ -1046,31 +1009,30 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   statusCard: {
-    marginBottom: 20,
-    padding: 20,
-    borderRadius: 16,
-    alignItems: 'center',
+    padding: 16,
+    marginBottom: 16,
+    backgroundColor: COLORS.cardBg,
   },
   statusCardHeader: {
-    width: '100%',
     alignItems: 'center',
   },
   statusBadgeLarge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderRadius: 12,
+    gap: 8,
   },
   statusTextLarge: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
+    textTransform: 'uppercase',
   },
   detailCard: {
+    padding: 16,
     marginBottom: 16,
-    padding: 20,
-    borderRadius: 16,
+    backgroundColor: COLORS.cardBg,
   },
   detailCardTitle: {
     fontSize: 16,
@@ -1081,7 +1043,10 @@ const styles = StyleSheet.create({
   detailRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    gap: 12,
   },
   detailIcon: {
     width: 32,
@@ -1090,15 +1055,14 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
   detailContent: {
     flex: 1,
+    gap: 4,
   },
   detailLabel: {
     fontSize: 13,
     color: COLORS.textSecondary,
-    marginBottom: 4,
   },
   detailValue: {
     fontSize: 15,
@@ -1113,11 +1077,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  amountRowDivider: {
-    borderBottomWidth: 2,
-    borderBottomColor: COLORS.primary,
-    marginTop: 8,
-    paddingTop: 16,
+  amountRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   amountLabel: {
     fontSize: 14,
@@ -1128,35 +1091,51 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.text,
   },
+  admissionRow: {
+    backgroundColor: COLORS.warningLight,
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 0,
+  },
+  discountRow: {
+    backgroundColor: COLORS.successLight,
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 0,
+  },
+  amountRowDivider: {
+    borderTopWidth: 2,
+    borderTopColor: COLORS.border,
+    borderBottomWidth: 2,
+    borderBottomColor: COLORS.border,
+    paddingVertical: 16,
+    marginVertical: 8,
+    backgroundColor: COLORS.background,
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+  },
   amountLabelTotal: {
     fontSize: 16,
     fontWeight: '700',
     color: COLORS.text,
   },
   amountValueTotal: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: COLORS.primary,
   },
-  installmentInfo: {
-    backgroundColor: COLORS.primaryLight,
-    padding: 16,
-    borderRadius: 12,
-  },
-  installmentText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.primary,
-    textAlign: 'center',
-  },
   actionButtons: {
-    marginTop: 8,
     gap: 12,
+    marginTop: 8,
   },
   actionButtonLarge: {
-    minHeight: 52,
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
+    paddingVertical: 16,
   },
   downloadButtonLarge: {
-    minHeight: 52,
+    backgroundColor: COLORS.text,
+    borderRadius: 12,
+    paddingVertical: 16,
   },
 });
